@@ -38,6 +38,6 @@ npm run dev
 Open `http://localhost:5173`.
 
 ### Notes
-- The backend runs on `http://localhost:5050`.
+- The backend runs on `http://localhost:8000`.
 - Flowcharts and execution playback are rendered locally in the UI.
 - For GCC/G++ setup, install MinGW or MSYS2 and ensure `gcc` and `g++` are in PATH.

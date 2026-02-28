@@ -18,7 +18,7 @@ export default function ModelTwo({ onSaveHistory }) {
     setLoading(true);
     setResult(null);
     try {
-      const response = await fetch("http://localhost:5050/api/diagnose", {
+      const response = await fetch("http://localhost:8000/api/diagnose", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ language, code })

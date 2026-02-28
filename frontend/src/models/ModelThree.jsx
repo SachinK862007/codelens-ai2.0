@@ -9,7 +9,7 @@ export default function ModelThree({ onSaveHistory }) {
     setLoading(true);
     setResult(null);
     try {
-      const response = await fetch("http://localhost:5050/api/idea", {
+      const response = await fetch("http://localhost:8000/api/idea", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ idea })

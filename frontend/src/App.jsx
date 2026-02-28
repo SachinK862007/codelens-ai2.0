@@ -61,11 +61,8 @@ export default function App() {
     <div className="app-shell single">
       <main className="main-content">
         <header className="top-bar glass-card">
-          <div className="brand">
-            <img className="brand-logo" src={logo} alt="Codelens logo" />
-            <div>
-              <div className="brand-title">Codelens</div>
-            </div>
+          <div className="brand hover-effect">
+            <img className="brand-logo" src={logo} alt="Codelens AI — See Deeper. Code Smarter." />
           </div>
           <ModelSwitcher
             models={MODEL_CONFIG}

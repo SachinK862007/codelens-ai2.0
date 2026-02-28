@@ -42,7 +42,7 @@ export default function ModelFour({ onSaveHistory }) {
     setLoading(true);
     setResult(null);
     try {
-      const response = await fetch("http://localhost:5050/api/levels/submit", {
+      const response = await fetch("http://localhost:8000/api/levels/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -112,9 +112,8 @@ export default function ModelFour({ onSaveHistory }) {
           {LEVELS.map((item, index) => (
             <div
               key={item.id}
-              className={`progress-step ${
-                index < levelIndex ? "done" : index === levelIndex ? "active" : ""
-              }`}
+              className={`progress-step ${index < levelIndex ? "done" : index === levelIndex ? "active" : ""
+                }`}
             >
               <div className="step-number">{item.id}</div>
               <div className="step-title">{item.title}</div>

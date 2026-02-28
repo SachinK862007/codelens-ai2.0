@@ -4,9 +4,10 @@ import fs from "fs/promises";
 import path from "path";
 import os from "os";
 import { spawn } from "child_process";
+import { WebSocketServer } from "ws";
 
 const app = express();
-const PORT = 5050;
+const PORT = 8000;
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
@@ -208,6 +209,17 @@ const buildDiagnosis = (stderr) => {
     };
   }
 
+  if (stderr.includes("EOFError: EOF when reading a line")) {
+    return {
+      summary: "Input required but none provided.",
+      steps: [
+        "Your code asked for user input, but the 'Program input (stdin)' box was empty.",
+        "Type your input into the 'Program input (stdin)' box before running your code.",
+        "If you have multiple inputs, separate them with spaces or newlines."
+      ]
+    };
+  }
+
   if (stderr.includes("error:")) {
     return {
       summary: "Compiler error detected.",
@@ -254,6 +266,119 @@ app.post("/api/run", async (req, res) => {
     steps: getSteps(code || ""),
     algorithmSteps: getAlgorithmSteps(code || "")
   });
+});
+
+app.post("/api/trace", async (req, res) => {
+  const { language, code, input } = req.body;
+  if (language !== "python") {
+    // For C/C++, fall back to simple sequential trace
+    const lines = (code || "").split("\n");
+    const trace = lines.map((line, i) => ({
+      line: i + 1,
+      event: "line",
+      code: line,
+      vars: {},
+      output: ""
+    }));
+    const result = await runByLanguage(language, code || "", input || "");
+    return res.json({ success: true, trace, stdout: result.stdout.trim() });
+  }
+
+  // Build a tracer wrapper for Python
+  const dir = await ensureTempDir();
+  const userCodePath = path.join(dir, "user_code.py");
+  const tracerPath = path.join(dir, "tracer.py");
+  await fs.writeFile(userCodePath, code || "", "utf8");
+
+  const tracerCode = `
+import sys, json, io, os
+
+trace_data = []
+user_code_file = os.path.abspath("${userCodePath.replace(/\\/g, "\\\\")}")
+source_lines = open(user_code_file).read().split("\\n")
+original_stdout = sys.stdout
+max_steps = 200
+step_count = 0
+
+class DualWriter:
+    def __init__(self):
+        self.buffer = io.StringIO()
+    def write(self, s):
+        self.buffer.write(s)
+    def flush(self):
+        pass
+    def getvalue(self):
+        return self.buffer.getvalue()
+
+writer = DualWriter()
+sys.stdout = writer
+
+def safe_repr(v):
+    try:
+        r = repr(v)
+        return r[:80] if len(r) > 80 else r
+    except:
+        return "?"
+
+def tracer(frame, event, arg):
+    global step_count
+    if step_count >= max_steps:
+        return None
+    fname = os.path.abspath(frame.f_code.co_filename)
+    if fname != user_code_file:
+        return tracer
+    lineno = frame.f_lineno
+    if event in ("line", "call", "return"):
+        step_count += 1
+        local_vars = {}
+        for k, v in frame.f_locals.items():
+            if not k.startswith("_") and k not in ("__builtins__",):
+                local_vars[k] = safe_repr(v)
+        code_text = source_lines[lineno - 1] if lineno <= len(source_lines) else ""
+        entry = {
+            "line": lineno,
+            "event": event,
+            "code": code_text,
+            "vars": local_vars,
+            "output": writer.getvalue(),
+            "func": frame.f_code.co_name if event in ("call", "return") else ""
+        }
+        if event == "return":
+            entry["returnVal"] = safe_repr(arg)
+        trace_data.append(entry)
+    return tracer
+
+sys.settrace(tracer)
+try:
+    exec(open(user_code_file).read(), {"__name__": "__main__", "__builtins__": __builtins__})
+except Exception as e:
+    trace_data.append({"line": 0, "event": "error", "code": str(e), "vars": {}, "output": writer.getvalue(), "func": ""})
+finally:
+    sys.settrace(None)
+
+final_output = writer.getvalue()
+sys.stdout = original_stdout
+print(json.dumps({"trace": trace_data, "stdout": final_output}))
+`;
+
+  await fs.writeFile(tracerPath, tracerCode, "utf8");
+  const result = await runProcess("python", ["-u", tracerPath], input || "", 10000);
+
+  try {
+    const parsed = JSON.parse(result.stdout);
+    res.json({ success: true, trace: parsed.trace || [], stdout: (parsed.stdout || "").trim() });
+  } catch {
+    // If trace parsing fails, build a simple trace from the code lines
+    const lines = (code || "").split("\n");
+    const simpleTrace = lines.map((line, i) => ({
+      line: i + 1,
+      event: "line",
+      code: line,
+      vars: {},
+      output: result.stdout || ""
+    }));
+    res.json({ success: true, trace: simpleTrace, stdout: (result.stdout || "").trim() });
+  }
 });
 
 app.post("/api/diagnose", async (req, res) => {
@@ -350,8 +475,8 @@ app.post("/api/levels/submit", async (req, res) => {
     message: passed
       ? "Great job! You can move to the next level."
       : run.stderr
-      ? "Your code has errors. Fix them and try again."
-      : "Output did not match the expected answer.",
+        ? "Your code has errors. Fix them and try again."
+        : "Output did not match the expected answer.",
     hint:
       !passed && levelId !== 5
         ? "Check input handling and output format."
@@ -359,6 +484,94 @@ app.post("/api/levels/submit", async (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Codelens backend running on http://localhost:${PORT}`);
+});
+
+const wss = new WebSocketServer({ server });
+
+wss.on("connection", (ws) => {
+  let child = null;
+
+  ws.on("message", async (data) => {
+    try {
+      const message = JSON.parse(data.toString());
+
+      if (message.type === "init") {
+        const { language, code } = message;
+        const dir = await ensureTempDir();
+        let cmd = "";
+        let args = [];
+
+        ws.send(JSON.stringify({ type: "output", data: `\x1b[35m$ run ${language}\x1b[0m\r\n` }));
+
+        if (language === "python") {
+          const filePath = path.join(dir, "main.py");
+          await fs.writeFile(filePath, code, "utf8");
+          cmd = "python";
+          args = ["-u", filePath]; // -u disables stdout buffering
+        } else if (language === "c" || language === "cpp") {
+          const ext = language === "c" ? ".c" : ".cpp";
+          const compiler = language === "c" ? "gcc" : "g++";
+          const filePath = path.join(dir, `main${ext}`);
+          const outputPath = path.join(dir, "main.exe");
+          await fs.writeFile(filePath, code, "utf8");
+
+          ws.send(JSON.stringify({ type: "output", data: `\x1b[90mCompiling...\x1b[0m\r\n` }));
+          const compile = spawn(compiler, [filePath, "-o", outputPath], { windowsHide: true });
+
+          const compileSucceeded = await new Promise((resolve) => {
+            let errorOccurred = false;
+            compile.stderr.on("data", (d) => {
+              errorOccurred = true;
+              ws.send(JSON.stringify({ type: "output", data: d.toString().replace(/\n/g, "\r\n") }));
+            });
+            compile.on("close", (c) => resolve(c === 0 && !errorOccurred));
+          });
+
+          if (!compileSucceeded) {
+            ws.send(JSON.stringify({ type: "exit", code: 1 }));
+            return;
+          }
+          cmd = outputPath;
+          args = [];
+        }
+
+        try {
+          child = spawn(cmd, args, { windowsHide: true });
+
+          child.stdout.on("data", (d) => {
+            ws.send(JSON.stringify({ type: "output", data: d.toString().replace(/\n/g, "\r\n") }));
+          });
+
+          child.stderr.on("data", (d) => {
+            ws.send(JSON.stringify({ type: "output", data: d.toString().replace(/\n/g, "\r\n") }));
+          });
+
+          child.on("close", (code) => {
+            ws.send(JSON.stringify({ type: "exit", code }));
+            child = null;
+          });
+        } catch (e) {
+          ws.send(JSON.stringify({ type: "output", data: `\r\n\x1b[31mError launching process.\x1b[0m` }));
+          ws.send(JSON.stringify({ type: "exit", code: 1 }));
+        }
+
+      } else if (message.type === "input") {
+        if (child && child.stdin) {
+          child.stdin.write(message.input);
+        }
+      } else if (message.type === "kill") {
+        if (child) child.kill();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  });
+
+  ws.on("close", () => {
+    if (child) {
+      child.kill();
+    }
+  });
 });

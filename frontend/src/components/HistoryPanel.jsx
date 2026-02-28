@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState } from "react";
 
 const formatTimestamp = (value) => {
   try {
@@ -16,7 +16,7 @@ export default function HistoryPanel({
   onSelectModel,
   variant = "sidebar"
 }) {
-  const [selectedId, setSelectedId] = useState(null);
+  const [selectedItem, setSelectedItem] = useState(null);
   const [search, setSearch] = useState("");
 
   const modelMap = useMemo(() => {
@@ -35,39 +35,31 @@ export default function HistoryPanel({
     );
   });
 
-  const selectedItem = filteredItems.find((item) => item.id === selectedId);
-
-  useEffect(() => {
-    if (!selectedId && filteredItems.length) {
-      setSelectedId(filteredItems[0].id);
-    }
-  }, [filteredItems, selectedId]);
-
   return (
     <aside className={`history-panel glass-card ${variant}`}>
       <div className="history-header">
         <div>
           <div className="history-title">History</div>
-          <div className="history-subtitle">Local sessions</div>
+          <div className="history-subtitle">Click any session to view details</div>
         </div>
         <button className="ghost-button" onClick={onClear} type="button">
-          Clear
+          Clear All
         </button>
       </div>
 
       <div className="history-models">
         <div className="history-label">Quick switch</div>
         <div className="model-chips">
-            {models.map((model) => (
-              <button
-                key={model.id}
-                className={`chip ${activeModelId === model.id ? "active" : ""}`}
-                onClick={() => onSelectModel(model.id)}
-                type="button"
-              >
-                {model.name}
-              </button>
-            ))}
+          {models.map((model) => (
+            <button
+              key={model.id}
+              className={`chip ${activeModelId === model.id ? "active" : ""}`}
+              onClick={() => onSelectModel(model.id)}
+              type="button"
+            >
+              {model.name}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -82,14 +74,14 @@ export default function HistoryPanel({
 
       <div className="history-list timeline">
         {filteredItems.length === 0 && (
-          <div className="empty-state">No conversations yet.</div>
+          <div className="empty-state">No sessions recorded yet.</div>
         )}
         {filteredItems.map((item) => (
           <div key={item.id} className="timeline-item">
             <div className="timeline-dot" />
             <button
-              className={`history-item ${selectedId === item.id ? "active" : ""}`}
-              onClick={() => setSelectedId(item.id)}
+              className="history-item"
+              onClick={() => setSelectedItem(item)}
               type="button"
             >
               <div className="history-item-title">{item.modelName}</div>
@@ -102,29 +94,38 @@ export default function HistoryPanel({
         ))}
       </div>
 
-      <div className="history-detail">
-        <div className="history-label">Selected session</div>
-        {selectedItem ? (
-          <div className="history-detail-card">
-            <div className="history-detail-title">
-              {modelMap.get(selectedItem.modelId) || selectedItem.modelName}
+      {/* Detail popup - only shown when a specific item is clicked */}
+      {selectedItem && (
+        <div className="history-detail-overlay" onClick={() => setSelectedItem(null)}>
+          <div className="history-detail-popup glass-card" onClick={(e) => e.stopPropagation()}>
+            <div className="history-detail-popup-header">
+              <div className="history-detail-title">
+                {modelMap.get(selectedItem.modelId) || selectedItem.modelName}
+              </div>
+              <button
+                className="ghost-button"
+                onClick={() => setSelectedItem(null)}
+                type="button"
+              >
+                ✕ Close
+              </button>
             </div>
-            <div className="history-detail-meta">
+            <div className="history-detail-popup-meta">
               {formatTimestamp(selectedItem.timestamp)}
             </div>
-            <div className="history-detail-section">
-              <div className="history-detail-label">Prompt</div>
-              <pre>{selectedItem.prompt || "No prompt stored."}</pre>
-            </div>
-            <div className="history-detail-section">
-              <div className="history-detail-label">Response</div>
-              <pre>{selectedItem.response || "No response stored."}</pre>
+            <div className="history-detail-popup-body">
+              <div className="history-detail-section">
+                <div className="history-detail-label">Code / Prompt</div>
+                <pre className="history-detail-code">{selectedItem.prompt || "No prompt stored."}</pre>
+              </div>
+              <div className="history-detail-section">
+                <div className="history-detail-label">Output / Response</div>
+                <pre className="history-detail-code">{selectedItem.response || "No response stored."}</pre>
+              </div>
             </div>
           </div>
-        ) : (
-          <div className="empty-state">Select a history item to view it.</div>
-        )}
-      </div>
+        </div>
+      )}
     </aside>
   );
 }
