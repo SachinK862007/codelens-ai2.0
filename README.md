@@ -1,4 +1,4 @@
-## Codelens Hackathon Web App
+## Codelens.ai  Web App
 
 Codelens is a local-only, open-source hackathon web app that looks like a Claude-style AI assistant. It supports four models and runs Python/C/C++ code locally without Docker or Kubernetes.
 
