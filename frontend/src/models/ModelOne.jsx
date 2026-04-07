@@ -8,7 +8,7 @@ const DEFAULT_CODE = `# Write your code here
 name = input("Enter your name: ")
 print(f"Hello, {name}! Welcome to Codelens.")`;
 
-export default function ModelOne({ onSaveHistory }) {
+export default function ModelOne({ onSaveHistory, runnerPrefill }) {
   const [language, setLanguage] = useState("python");
   const [code, setCode] = useState(DEFAULT_CODE);
   const [intent, setIntent] = useState("");
@@ -20,13 +20,21 @@ export default function ModelOne({ onSaveHistory }) {
   const flowchartRef = useRef(null);
   const [algoOpen, setAlgoOpen] = useState(false);
   const [videoOpen, setVideoOpen] = useState(false);
+  const [stdinBuffer, setStdinBuffer] = useState("");
 
   const terminalRef = useRef(null);
   const xtermRef = useRef(null);
   const wsRef = useRef(null);
   const fitAddonRef = useRef(null);
+  const liveInputRef = useRef("");
 
   const codeLines = useMemo(() => code.split("\n"), [code]);
+
+  useEffect(() => {
+    if (!runnerPrefill?.code) return;
+    if (typeof runnerPrefill.language === "string") setLanguage(runnerPrefill.language);
+    setCode(runnerPrefill.code);
+  }, [runnerPrefill?.ts]); // re-run on new prefill
 
   useEffect(() => {
     if (terminalRef.current && !xtermRef.current) {
@@ -50,12 +58,30 @@ export default function ModelOne({ onSaveHistory }) {
       fitAddonRef.current = fitAddon;
 
       term.onData(data => {
-        // Echo to terminal
-        term.write(data);
+        // Proper Backspace handling (xterm sends DEL \x7f)
+        if (data === "\u007f") {
+          if (liveInputRef.current.length > 0) {
+            liveInputRef.current = liveInputRef.current.slice(0, -1);
+            term.write("\b \b");
+          }
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: "input", input: "\b" }));
+          }
+          return;
+        }
+
         let payload = data;
-        if (data === '\r') {
-          term.write('\n');
-          payload = '\n';
+        if (data === "\r") {
+          term.write("\r\n");
+          payload = "\n";
+          liveInputRef.current = "";
+        } else if (data >= " " && data !== "\x1b") {
+          // printable characters
+          liveInputRef.current += data;
+          term.write(data);
+        } else {
+          // control sequences
+          term.write(data);
         }
 
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -159,6 +185,28 @@ export default function ModelOne({ onSaveHistory }) {
       xtermRef.current?.write("\r\n\x1b[31mFailed to connect to Local Execution Engine.\x1b[0m\r\n");
       setLoading(false);
     };
+  };
+
+  const sendStdinLine = () => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    const text = stdinBuffer;
+    if (!text) return;
+    wsRef.current.send(JSON.stringify({ type: "input", input: text + "\n" }));
+    xtermRef.current?.write(text + "\r\n");
+    setStdinBuffer("");
+  };
+
+  const onStdinKeyDown = (e) => {
+    // Requirement: bind Backspace keydown to delete last character (keyCode 8).
+    if (e.keyCode === 8) {
+      e.preventDefault();
+      setStdinBuffer((prev) => prev.slice(0, -1));
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      sendStdinLine();
+    }
   };
 
   const generatePlaybackVideo = async () => {
@@ -491,6 +539,19 @@ export default function ModelOne({ onSaveHistory }) {
         </div>
         <div className="output-card terminal-card" style={{ padding: '8px' }}>
           <div ref={terminalRef} style={{ width: '100%', height: '340px' }} />
+        </div>
+        <div className="field-row" style={{ marginTop: 10 }}>
+          <label>Terminal input</label>
+          <input
+            value={stdinBuffer}
+            onChange={(e) => setStdinBuffer(e.target.value)}
+            onKeyDown={onStdinKeyDown}
+            placeholder="Type input here and press Enter…"
+            spellCheck={false}
+          />
+          <button className="ghost-button" type="button" onClick={sendStdinLine} disabled={!stdinBuffer}>
+            Send
+          </button>
         </div>
       </div>
 

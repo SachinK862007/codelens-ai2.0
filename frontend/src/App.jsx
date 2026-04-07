@@ -2,25 +2,36 @@ import React, { useMemo, useState, useEffect } from "react";
 import HistoryPanel from "./components/HistoryPanel.jsx";
 import ModelSwitcher from "./components/ModelSwitcher.jsx";
 import Modal from "./components/Modal.jsx";
-import logo from "./assets/codelens-logo.png";
 import ModelOne from "./models/ModelOne.jsx";
 import ModelTwo from "./models/ModelTwo.jsx";
 import ModelThree from "./models/ModelThree.jsx";
 import ModelFour from "./models/ModelFour.jsx";
+import ModelCodeWriter from "./models/ModelCodeWriter.jsx";
 
 const STORAGE_KEY = "codelens_history_v1";
+const RUNNER_PREFILL_KEY = "codelens_runner_prefill_v1";
 
 const MODEL_CONFIG = [
   { id: "model-1", name: "Codelens Code Runner" },
   { id: "model-2", name: "Codelens Debugger" },
   { id: "model-3", name: "Codelens Idea Builder" },
-  { id: "model-4", name: "Codelens Learner" }
+  { id: "model-4", name: "Codelens Learner" },
+  { id: "code-writer", name: "Code Writer" }
 ];
 
 export default function App() {
   const [activeModelId, setActiveModelId] = useState(MODEL_CONFIG[0].id);
   const [historyItems, setHistoryItems] = useState([]);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [runnerPrefill, setRunnerPrefill] = useState(() => {
+    const raw = localStorage.getItem(RUNNER_PREFILL_KEY);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  });
 
   useEffect(() => {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -36,6 +47,16 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(historyItems));
   }, [historyItems]);
+
+  useEffect(() => {
+    if (!runnerPrefill) return;
+    localStorage.setItem(RUNNER_PREFILL_KEY, JSON.stringify(runnerPrefill));
+  }, [runnerPrefill]);
+
+  const runInVisualizer = ({ language, code }) => {
+    setRunnerPrefill({ language, code, ts: Date.now() });
+    setActiveModelId("model-1");
+  };
 
   const activeModel = useMemo(
     () => MODEL_CONFIG.find((item) => item.id === activeModelId),
@@ -62,7 +83,11 @@ export default function App() {
       <main className="main-content">
         <header className="top-bar glass-card">
           <div className="brand hover-effect">
-            <img className="brand-logo" src={logo} alt="Codelens AI — See Deeper. Code Smarter." />
+            <div className="brand-text-logo" aria-label="CodeLens.ai">
+              <span className="brand-text-code">Code</span>
+              <span className="brand-text-lens">Lens</span>
+              <span className="brand-text-ai">.ai</span>
+            </div>
           </div>
           <ModelSwitcher
             models={MODEL_CONFIG}
@@ -101,16 +126,19 @@ export default function App() {
 
         <section className="model-panel glass-card">
           {activeModelId === "model-1" && (
-            <ModelOne onSaveHistory={addHistoryEntry} />
+            <ModelOne onSaveHistory={addHistoryEntry} runnerPrefill={runnerPrefill} />
           )}
           {activeModelId === "model-2" && (
-            <ModelTwo onSaveHistory={addHistoryEntry} />
+            <ModelTwo onSaveHistory={addHistoryEntry} onRunInVisualizer={runInVisualizer} />
           )}
           {activeModelId === "model-3" && (
             <ModelThree onSaveHistory={addHistoryEntry} />
           )}
           {activeModelId === "model-4" && (
             <ModelFour onSaveHistory={addHistoryEntry} />
+          )}
+          {activeModelId === "code-writer" && (
+            <ModelCodeWriter onSaveHistory={addHistoryEntry} />
           )}
         </section>
       </main>

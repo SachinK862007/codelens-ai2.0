@@ -41,3 +41,18 @@ Open `http://localhost:5173`.
 - The backend runs on `http://localhost:8000`.
 - Flowcharts and execution playback are rendered locally in the UI.
 - For GCC/G++ setup, install MinGW or MSYS2 and ensure `gcc` and `g++` are in PATH.
+
+### AI provider (no Ollama required)
+By default, the app can use **Google Gemini** (hosted) if you set an API key, so your friends can run it from GitHub without installing Ollama.
+
+- **Option A (recommended)**: Google Gemini (hosted)
+  - Set `GEMINI_API_KEY` in the backend environment.
+  - Optional: `GEMINI_MODEL` (default: `gemini-1.5-flash`)
+  - Optional: `AI_PROVIDER=gemini`
+
+- **Option B**: Local Ollama (offline)
+  - Install Ollama and pull a model (example: `ollama pull qwen2.5-coder:7b`)
+  - Optional: `OLLAMA_MODEL`, `OLLAMA_BASE_URL`
+  - Optional: `AI_PROVIDER=ollama`
+
+If `AI_PROVIDER=auto` (default), the backend will **prefer Gemini when `GEMINI_API_KEY` is set**, otherwise it will fall back to Ollama.
