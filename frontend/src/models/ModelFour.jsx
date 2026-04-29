@@ -2,48 +2,38 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
 import { streamClaudeJson } from "../lib/claudeStream.js";
 import { PRACTICE_LANGUAGES, PRACTICE_QUESTIONS } from "../data/practiceQuestions.js";
+import { extractJsonBool, extractJsonString, safeJsonParse } from "../lib/partialJson.js";
+import AILoadingAnimation from "../components/AILoadingAnimation.jsx";
 
 const SYSTEM_PROMPT = `Evaluate if the user's code correctly solves the problem.
 Output comparison is CASE INSENSITIVE. Check the LOGIC, not exact character match.
 Return JSON only: { "passed": true/false, "feedback": "...", "hint": "..." }.
 Do not reveal the final full answer code.`;
 
-function safeJsonParse(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-
-function shuffle(arr) {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
+function ordered(arr) {
+  return [...arr];
 }
 
 export default function ModelFour({ onSaveHistory }) {
   const [language, setLanguage] = useState("python");
-  const [order, setOrder] = useState(() => shuffle(PRACTICE_QUESTIONS.python));
+  const [order, setOrder] = useState(() => ordered(PRACTICE_QUESTIONS.python));
   const [index, setIndex] = useState(0);
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
-  const [rawStream, setRawStream] = useState("");
   const [result, setResult] = useState(null);
+  const [liveFeedback, setLiveFeedback] = useState("");
+  const [liveHint, setLiveHint] = useState("");
+  const [livePassed, setLivePassed] = useState(null);
   const [error, setError] = useState("");
   const [passedFlash, setPassedFlash] = useState(false);
   const abortRef = useRef(null);
   const advanceTimerRef = useRef(null);
 
   useEffect(() => {
-    setOrder(shuffle(PRACTICE_QUESTIONS[language] || []));
+    setOrder(ordered(PRACTICE_QUESTIONS[language] || []));
     setIndex(0);
     setCode("");
     setResult(null);
-    setRawStream("");
     setError("");
   }, [language]);
 
@@ -71,9 +61,11 @@ export default function ModelFour({ onSaveHistory }) {
 
     setLoading(true);
     setError("");
-    setRawStream("");
     setResult(null);
     setPassedFlash(false);
+    setLiveFeedback("");
+    setLiveHint("");
+    setLivePassed(null);
 
     const userText = `Language: ${language}
 Problem:
@@ -92,31 +84,42 @@ ${src}`;
         signal: ac.signal,
         onDelta: (t) => {
           collected += t;
-          setRawStream(collected);
-          const parsed = safeJsonParse(collected);
-          if (parsed) setResult(parsed);
+          // Extract partial values for live feedback while streaming
+          const fb = extractJsonString(collected, "feedback");
+          const hint = extractJsonString(collected, "hint");
+          const passed = extractJsonBool(collected, "passed");
+          if (fb != null) setLiveFeedback(fb);
+          if (hint != null) setLiveHint(hint);
+          if (passed != null) setLivePassed(passed);
         }
       });
 
       const parsed = safeJsonParse(collected);
-      if (!parsed) throw new Error("AI did not return valid JSON. Retry.");
-      setResult(parsed);
+      if (parsed) {
+        setResult(parsed);
 
-      onSaveHistory?.({
-        title: parsed.passed ? "Practice passed" : "Practice failed",
-        prompt: `${language} • ${question.title}`,
-        response: parsed.feedback || ""
-      });
+        onSaveHistory?.({
+          title: parsed.passed ? "Practice passed" : "Practice failed",
+          prompt: `${language} • ${question.title}`,
+          response: parsed.feedback || ""
+        });
 
-      if (parsed.passed) {
-        setPassedFlash(true);
-        advanceTimerRef.current = window.setTimeout(() => {
-          setPassedFlash(false);
-          setIndex((p) => Math.min(p + 1, total - 1));
-          setCode("");
-          setResult(null);
-          setRawStream("");
-        }, 2000);
+        if (parsed.passed) {
+          setPassedFlash(true);
+          advanceTimerRef.current = window.setTimeout(() => {
+            setPassedFlash(false);
+            setIndex((p) => Math.min(p + 1, total - 1));
+            setCode("");
+            setResult(null);
+          }, 2000);
+        }
+      } else {
+        // Use extracted values even if full parse failed
+        if (liveFeedback) {
+          setResult({ passed: livePassed || false, feedback: liveFeedback, hint: liveHint || "" });
+        } else {
+          setError("AI response could not be parsed. Please try again.");
+        }
       }
     } catch (e) {
       if (e?.name === "AbortError") return;
@@ -199,40 +202,58 @@ ${src}`;
           </div>
         ) : null}
 
-        {loading ? <div className="spinner">Streaming output…</div> : null}
-
-        {!result && rawStream ? (
-          <div className="output-card">
-            <div className="section-label">Streaming JSON</div>
-            <pre className="stream-pre">{rawStream}</pre>
-          </div>
-        ) : null}
+        {loading && (
+          <AILoadingAnimation
+            message="Evaluating your solution..."
+            subtext="Checking logic and correctness"
+          />
+        )}
       </div>
 
       <div className="panel">
         <div className="panel-title">Feedback</div>
-        {result ? (
-          <div className="output-card">
-            <div className={`status-pill ${result.passed ? "ok" : "fail"}`}>
-              {result.passed ? "Passed" : "Try Again"}
+        {result || (liveFeedback && loading) ? (
+          <div className="output-card ai-result-enter">
+            <div className={`status-pill ${((result?.passed ?? livePassed) ? "ok" : "fail")}`}>
+              {(result?.passed ?? livePassed) ? "Passed" : "Try Again"}
             </div>
             <div className="section-label">What happened</div>
-            <p className="para">{result.feedback}</p>
-            {result.hint ? (
+            <p className="para">{result?.feedback || liveFeedback || (loading ? "Checking your logic..." : "")}</p>
+            {(result?.hint || liveHint) ? (
               <>
                 <div className="section-label">Hint</div>
-                <p className="hint">{result.hint}</p>
+                <p className="hint">{result?.hint || liveHint}</p>
               </>
             ) : null}
-            {!result.passed ? (
+            {!(result?.passed ?? livePassed) ? (
               <div className="empty-state" style={{ marginTop: 10 }}>
-                Fix your code and retry — we won’t reveal the answer.
+                Fix your code and retry — we won't reveal the answer.
               </div>
-            ) : (
+            ) : result || livePassed ? (
               <div className="empty-state" style={{ marginTop: 10 }}>
                 Nice. Moving to the next question in 2 seconds…
               </div>
-            )}
+            ) : null}
+
+            <div className="button-row" style={{ marginTop: 10 }}>
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() => {
+                  if (advanceTimerRef.current) window.clearTimeout(advanceTimerRef.current);
+                  setPassedFlash(false);
+                  setIndex((p) => Math.min(p + 1, total - 1));
+                  setCode("");
+                  setResult(null);
+                  setLiveFeedback("");
+                  setLiveHint("");
+                  setLivePassed(null);
+                }}
+                disabled={loading || !(result?.passed ?? livePassed) || index >= total - 1}
+              >
+                Next level
+              </button>
+            </div>
           </div>
         ) : (
           <div className="empty-state">Run a check to see feedback and hints.</div>

@@ -13,6 +13,7 @@ export default function ModelOne({ onSaveHistory, runnerPrefill }) {
   const [code, setCode] = useState(DEFAULT_CODE);
   const [intent, setIntent] = useState("");
   const [loading, setLoading] = useState(false);
+  const [wsReady, setWsReady] = useState(false);
   const [result, setResult] = useState(null);
   const [activeLine, setActiveLine] = useState(0);
   const [videoUrl, setVideoUrl] = useState("");
@@ -144,6 +145,7 @@ export default function ModelOne({ onSaveHistory, runnerPrefill }) {
 
   const runCode = async () => {
     setLoading(true);
+    setWsReady(false);
     setVideoUrl("");
     setVideoStatus("");
 
@@ -163,6 +165,7 @@ export default function ModelOne({ onSaveHistory, runnerPrefill }) {
     wsRef.current = ws;
 
     ws.onopen = () => {
+      setWsReady(true);
       ws.send(JSON.stringify({ type: "init", language, code }));
     };
 
@@ -172,6 +175,7 @@ export default function ModelOne({ onSaveHistory, runnerPrefill }) {
         xtermRef.current?.write(msg.data);
       } else if (msg.type === "exit") {
         setLoading(false);
+        setWsReady(false);
         ws.close();
         onSaveHistory({
           title: "Interactive execution",
@@ -184,7 +188,9 @@ export default function ModelOne({ onSaveHistory, runnerPrefill }) {
     ws.onerror = () => {
       xtermRef.current?.write("\r\n\x1b[31mFailed to connect to Local Execution Engine.\x1b[0m\r\n");
       setLoading(false);
+      setWsReady(false);
     };
+    ws.onclose = () => setWsReady(false);
   };
 
   const sendStdinLine = () => {
@@ -415,6 +421,24 @@ export default function ModelOne({ onSaveHistory, runnerPrefill }) {
           ctx.fillStyle = "#43d9db"; ctx.font = "11px Consolas";
           ctx.fillText(`returned: ${currentStep.returnVal}`, rX + 6, cY + 100);
         }
+
+        // Loop iteration + condition branch badge (from backend trace)
+        const iter = currentStep.loop_iteration;
+        if (iter) {
+          ctx.fillStyle = "#9ef1c2"; ctx.font = "bold 11px Consolas";
+          ctx.fillText(`loop #${iter}`, rX + 210, cY + 58);
+        }
+        if (typeof currentStep.condition_value === "boolean") {
+          const ok = currentStep.condition_value;
+          ctx.fillStyle = ok ? "#9ef1c2" : "#ffb4b4";
+          ctx.font = "bold 11px Consolas";
+          ctx.fillText(ok ? "TRUE" : "FALSE", rX + 210, cY + 80);
+          if (currentStep.condition_expr) {
+            ctx.fillStyle = "#c4a0ff";
+            ctx.font = "10px Consolas";
+            ctx.fillText(String(currentStep.condition_expr).slice(0, 28), rX + 260, cY + 80);
+          }
+        }
       }
 
       // === RIGHT MID: Variables ===
@@ -546,10 +570,11 @@ export default function ModelOne({ onSaveHistory, runnerPrefill }) {
             value={stdinBuffer}
             onChange={(e) => setStdinBuffer(e.target.value)}
             onKeyDown={onStdinKeyDown}
-            placeholder="Type input here and press Enter…"
+            placeholder={wsReady ? "Type input here and press Enter…" : "Run the program first to enable input…"}
             spellCheck={false}
+            disabled={!wsReady}
           />
-          <button className="ghost-button" type="button" onClick={sendStdinLine} disabled={!stdinBuffer}>
+          <button className="ghost-button" type="button" onClick={sendStdinLine} disabled={!wsReady || !stdinBuffer}>
             Send
           </button>
         </div>

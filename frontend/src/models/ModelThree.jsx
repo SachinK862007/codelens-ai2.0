@@ -1,5 +1,7 @@
 import React, { useRef, useState } from "react";
 import { streamClaudeJson } from "../lib/claudeStream.js";
+import { safeJsonParse } from "../lib/partialJson.js";
+import AILoadingAnimation, { AISkeletonLoader } from "../components/AILoadingAnimation.jsx";
 
 const SYSTEM_PROMPT = `You are CodeLens.ai Project Roadmap Generator.
 
@@ -25,19 +27,10 @@ Rules:
 - Phases must be detailed and tailored to the description.
 - Never reuse cached output; regenerate fully every request.`;
 
-function safeJsonParse(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-
 export default function ModelThree({ onSaveHistory }) {
   const [idea, setIdea] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
-  const [rawStream, setRawStream] = useState("");
   const [error, setError] = useState("");
   const [refineText, setRefineText] = useState("");
   const abortRef = useRef(null);
@@ -55,7 +48,6 @@ export default function ModelThree({ onSaveHistory }) {
 
     setLoading(true);
     setError("");
-    setRawStream("");
     setResult(null);
 
     const context = refine && result ? JSON.stringify(result) : "";
@@ -73,20 +65,20 @@ export default function ModelThree({ onSaveHistory }) {
         signal: ac.signal,
         onDelta: (t) => {
           collected += t;
-          setRawStream(collected);
-          const parsed = safeJsonParse(collected);
-          if (parsed) setResult(parsed);
         }
       });
 
       const parsed = safeJsonParse(collected);
-      if (!parsed) throw new Error("AI did not return valid JSON. Retry.");
-      setResult(parsed);
-      onSaveHistory?.({
-        title: refine ? "Roadmap refined" : "Roadmap generated",
-        prompt: prompt.slice(0, 180),
-        response: (parsed.project_title || "").slice(0, 180)
-      });
+      if (parsed) {
+        setResult(parsed);
+        onSaveHistory?.({
+          title: refine ? "Roadmap refined" : "Roadmap generated",
+          prompt: prompt.slice(0, 180),
+          response: (parsed.project_title || "").slice(0, 180)
+        });
+      } else {
+        setError("AI response could not be parsed. Please try again.");
+      }
     } catch (e) {
       if (e?.name === "AbortError") return;
       setError(e?.message || "Roadmap generation failed.");
@@ -141,20 +133,20 @@ export default function ModelThree({ onSaveHistory }) {
           </div>
         ) : null}
 
-        {loading ? <div className="spinner">Streaming output…</div> : null}
-
-        {!result && rawStream ? (
-          <div className="output-card">
-            <div className="section-label">Streaming JSON</div>
-            <pre className="stream-pre">{rawStream}</pre>
-          </div>
-        ) : null}
+        {loading && (
+          <AILoadingAnimation
+            message="Building your roadmap..."
+            subtext="Generating tech stack, APIs, phases & deployment plan"
+          />
+        )}
       </div>
 
       <div className="panel">
         <div className="panel-title">Roadmap</div>
-        {result ? (
-          <div className="writer-output">
+        {loading ? (
+          <AISkeletonLoader />
+        ) : result ? (
+          <div className="writer-output ai-result-enter">
             <div className="card">
               <div className="section-label">Project</div>
               <div className="hero-title" style={{ fontSize: 18, margin: "6px 0 0" }}>
@@ -212,7 +204,17 @@ export default function ModelThree({ onSaveHistory }) {
 
             <div className="card">
               <div className="section-label">File/folder structure</div>
-              <pre className="stream-pre" style={{ maxHeight: 320 }}>{result.file_folder_structure}</pre>
+              <pre style={{
+                background: "linear-gradient(135deg, #1b1233, #2c1b46)",
+                color: "#e2d6f6",
+                padding: "14px 16px",
+                borderRadius: "12px",
+                fontSize: "12px",
+                fontFamily: '"Consolas", monospace',
+                whiteSpace: "pre-wrap",
+                maxHeight: 320,
+                overflowY: "auto"
+              }}>{result.file_folder_structure}</pre>
             </div>
 
             <div className="card">

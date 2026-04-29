@@ -2,6 +2,8 @@ import React, { useMemo, useRef, useState } from "react";
 import CodeBlock from "../components/CodeBlock.jsx";
 import FlowchartDiagram from "../components/FlowchartDiagram.jsx";
 import { streamClaudeJson } from "../lib/claudeStream.js";
+import { extractJsonString, safeJsonParse } from "../lib/partialJson.js";
+import AILoadingAnimation, { AISkeletonLoader } from "../components/AILoadingAnimation.jsx";
 
 const LANGUAGES = [
   { id: "c", label: "C", icon: "C" },
@@ -42,20 +44,12 @@ Rules:
 - Keep "code" complete and runnable.
 - Never include backticks in code fences.`;
 
-function safeJsonParse(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-
 export default function ModelCodeWriter({ onSaveHistory }) {
   const [language, setLanguage] = useState("python");
   const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(false);
-  const [rawStream, setRawStream] = useState("");
   const [data, setData] = useState(null);
+  const [liveLogic, setLiveLogic] = useState("");
   const [error, setError] = useState("");
   const abortRef = useRef(null);
 
@@ -79,7 +73,7 @@ export default function ModelCodeWriter({ onSaveHistory }) {
     setLoading(true);
     setError("");
     setData(null);
-    setRawStream("");
+    setLiveLogic("");
 
     const userText = `Language: ${lang}\n\nTask:\n${prompt}\n\nReturn the JSON only.`;
     let collected = "";
@@ -91,23 +85,22 @@ export default function ModelCodeWriter({ onSaveHistory }) {
         signal: ac.signal,
         onDelta: (t) => {
           collected += t;
-          setRawStream(collected);
-          const parsed = safeJsonParse(collected);
-          if (parsed) setData(parsed);
+          const logic = extractJsonString(collected, "logic_explanation");
+          if (logic != null) setLiveLogic(logic);
         }
       });
 
       const finalParsed = safeJsonParse(collected);
-      if (!finalParsed) {
-        throw new Error("Model did not return valid JSON. Please retry.");
+      if (finalParsed) {
+        setData(finalParsed);
+        onSaveHistory?.({
+          title: "Code Writer",
+          prompt: `${lang}: ${prompt}`.slice(0, 220),
+          response: (finalParsed.code || "").slice(0, 220)
+        });
+      } else {
+        setError("AI response could not be parsed. Please try again.");
       }
-
-      setData(finalParsed);
-      onSaveHistory?.({
-        title: "Code Writer",
-        prompt: `${lang}: ${prompt}`.slice(0, 220),
-        response: (finalParsed.code || "").slice(0, 220)
-      });
     } catch (e) {
       if (e?.name === "AbortError") return;
       setError(e?.message || "Request failed.");
@@ -125,7 +118,7 @@ export default function ModelCodeWriter({ onSaveHistory }) {
       <div className="panel">
         <div className="panel-title">Code Writer</div>
         <div className="panel-subtitle">
-          Describe what you want. Get code, algorithm steps, a flowchart, and complexity—streamed live.
+          Describe what you want. Get code, algorithm steps, a flowchart, and complexity.
         </div>
 
         <div className="field-row">
@@ -174,20 +167,20 @@ export default function ModelCodeWriter({ onSaveHistory }) {
           </div>
         ) : null}
 
-        {loading ? <div className="spinner">Streaming output…</div> : null}
-
-        {!data && rawStream ? (
-          <div className="output-card">
-            <div className="section-label">Streaming JSON</div>
-            <pre className="stream-pre">{rawStream}</pre>
-          </div>
-        ) : null}
+        {loading && (
+          <AILoadingAnimation
+            message="Writing your code..."
+            subtext="Generating code, algorithm, flowchart & complexity analysis"
+          />
+        )}
       </div>
 
       <div className="panel">
         <div className="panel-title">Output</div>
-        {data ? (
-          <div className="writer-output">
+        {loading ? (
+          <AISkeletonLoader />
+        ) : data ? (
+          <div className="writer-output ai-result-enter">
             <div className="writer-badges">
               <span className="badge">{data.language || langMeta.label}</span>
               {data.time_complexity ? <span className="badge">Time: {data.time_complexity}</span> : null}
@@ -211,7 +204,7 @@ export default function ModelCodeWriter({ onSaveHistory }) {
 
             <div className="card">
               <div className="section-label">Logic Explanation</div>
-              <p className="para">{data.logic_explanation || "Logic explanation appears here."}</p>
+              <p className="para">{data.logic_explanation || liveLogic || "Logic explanation appears here."}</p>
             </div>
 
             <div className="card">
@@ -226,4 +219,3 @@ export default function ModelCodeWriter({ onSaveHistory }) {
     </div>
   );
 }
-

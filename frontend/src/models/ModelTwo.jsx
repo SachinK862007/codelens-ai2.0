@@ -1,7 +1,9 @@
 import React, { useRef, useState } from "react";
 import { streamClaudeJson } from "../lib/claudeStream.js";
+import { safeJsonParse } from "../lib/partialJson.js";
 import CodeBlock from "../components/CodeBlock.jsx";
 import LineNumberedCodeBlock from "../components/LineNumberedCodeBlock.jsx";
+import AILoadingAnimation, { AISkeletonLoader } from "../components/AILoadingAnimation.jsx";
 
 const SYSTEM_PROMPT = `You are CodeLens.ai Smart Error Debugger.
 Respond ONLY in JSON format with keys:
@@ -22,20 +24,11 @@ Rules:
 - execution_output: expected output when running corrected_code with a reasonable sample input if needed.
 - Never include markdown or backticks. JSON only.`;
 
-function safeJsonParse(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-
 export default function ModelTwo({ onSaveHistory, onRunInVisualizer }) {
   const [language, setLanguage] = useState("python");
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
-  const [rawStream, setRawStream] = useState("");
   const [error, setError] = useState("");
   const abortRef = useRef(null);
 
@@ -59,7 +52,6 @@ export default function ModelTwo({ onSaveHistory, onRunInVisualizer }) {
 
     setLoading(true);
     setResult(null);
-    setRawStream("");
     setError("");
 
     const userText = `Language (user selected): ${language}
@@ -75,21 +67,20 @@ ${src}`.trim();
         signal: ac.signal,
         onDelta: (t) => {
           collected += t;
-          setRawStream(collected);
-          const parsed = safeJsonParse(collected);
-          if (parsed) setResult(parsed);
         }
       });
 
       const parsed = safeJsonParse(collected);
-      if (!parsed) throw new Error("AI did not return valid JSON. Retry.");
-
-      setResult(parsed);
-      onSaveHistory?.({
-        title: "Smart Debugger",
-        prompt: src.slice(0, 200),
-        response: (parsed.corrected_code || "").slice(0, 200)
-      });
+      if (parsed) {
+        setResult(parsed);
+        onSaveHistory?.({
+          title: "Smart Debugger",
+          prompt: src.slice(0, 200),
+          response: (parsed.corrected_code || "").slice(0, 200)
+        });
+      } else {
+        setError("AI response could not be parsed. Please try again.");
+      }
     } catch (e) {
       if (e?.name === "AbortError") return;
       setError(e?.message || "Debug request failed.");
@@ -137,19 +128,21 @@ ${src}`.trim();
             </button>
           </div>
         ) : null}
-        {loading ? <div className="spinner">Streaming output…</div> : null}
-        {!result && rawStream ? (
-          <div className="output-card">
-            <div className="section-label">Streaming JSON</div>
-            <pre className="stream-pre">{rawStream}</pre>
-          </div>
-        ) : null}
+
+        {loading && (
+          <AILoadingAnimation
+            message="Analyzing your code..."
+            subtext="Detecting errors and generating fixes"
+          />
+        )}
       </div>
 
       <div className="panel">
         <div className="panel-title">Report</div>
-        {result ? (
-          <div className="writer-output">
+        {loading ? (
+          <AISkeletonLoader />
+        ) : result ? (
+          <div className="writer-output ai-result-enter">
             <div className="writer-badges">
               <span className="badge">{result.language || language}</span>
               <span className="badge">Errors: {Array.isArray(result.errors) ? result.errors.length : 0}</span>

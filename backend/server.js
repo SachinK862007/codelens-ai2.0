@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import fs from "fs/promises";
@@ -15,10 +16,12 @@ app.use(cors({
 app.use(express.json({ limit: "1mb" }));
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen2.5-coder:7b";
-const AI_PROVIDER = process.env.AI_PROVIDER || "auto"; // auto | ollama | gemini
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.1:latest";
+const AI_PROVIDER = process.env.AI_PROVIDER || "ollama"; // ollama | gemini | auto
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+const AI_TEMPERATURE = Number(process.env.AI_TEMPERATURE || 0.2);
+const AI_MAX_TOKENS = Number(process.env.AI_MAX_TOKENS || 1024);
 
 const writeSse = (res, data) => {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
@@ -41,7 +44,7 @@ const geminiStreamToSse = async ({ system, userText }, res) => {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.2 }
+      generationConfig: { temperature: AI_TEMPERATURE, maxOutputTokens: AI_MAX_TOKENS }
     })
   });
 
@@ -122,7 +125,7 @@ const ollamaStreamToSse = async ({ system, userText }, res) => {
     writeSse(res, {
       type: "error",
       error:
-        "No local Ollama model is available. Install Ollama, then run: `ollama pull qwen2.5-coder:7b` (or any model) and retry."
+        "No local Ollama model is available. Install Ollama, then run: `ollama pull llama3.1:8b` (or any model) and retry."
     });
     writeSse(res, { type: "done" });
     return;
@@ -469,6 +472,7 @@ source_lines = open(user_code_file).read().split("\\n")
 original_stdout = sys.stdout
 max_steps = 200
 step_count = 0
+loop_counts = {}
 
 class DualWriter:
     def __init__(self):
@@ -510,6 +514,12 @@ def capture_stack(frame):
         depth += 1
     return list(reversed(frames))
 
+def eval_condition(expr, frame):
+    try:
+        return bool(eval(expr, frame.f_globals, frame.f_locals))
+    except:
+        return None
+
 def tracer(frame, event, arg):
     global step_count
     if step_count >= max_steps:
@@ -525,6 +535,25 @@ def tracer(frame, event, arg):
             if not k.startswith("_") and k not in ("__builtins__",):
                 local_vars[k] = safe_repr(v)
         code_text = source_lines[lineno - 1] if lineno <= len(source_lines) else ""
+        stripped = (code_text or "").strip()
+        iteration = None
+        cond_value = None
+        cond_expr = None
+        if stripped.startswith("for ") or stripped.startswith("while "):
+            loop_counts[lineno] = loop_counts.get(lineno, 0) + 1
+            iteration = loop_counts[lineno]
+        if stripped.startswith("if ") or stripped.startswith("elif ") or stripped.startswith("while "):
+            # Extract condition between keyword and colon
+            try:
+                kw = "if " if stripped.startswith("if ") else ("elif " if stripped.startswith("elif ") else "while ")
+                cond_expr = stripped[len(kw):]
+                if cond_expr.endswith(":"):
+                    cond_expr = cond_expr[:-1].strip()
+                cond_value = eval_condition(cond_expr, frame)
+            except:
+                cond_expr = None
+                cond_value = None
+
         entry = {
             "line": lineno,
             "event": event,
@@ -532,7 +561,10 @@ def tracer(frame, event, arg):
             "vars": local_vars,
             "output": writer.getvalue(),
             "func": frame.f_code.co_name if event in ("call", "return") else "",
-            "stack": capture_stack(frame)
+            "stack": capture_stack(frame),
+            "loop_iteration": iteration,
+            "condition_expr": cond_expr,
+            "condition_value": cond_value
         }
         if event == "return":
             entry["returnVal"] = safe_repr(arg)
@@ -702,7 +734,7 @@ ${code || ""}`.trim();
       passed: false,
       message: "Try Again",
       feedback: "Unable to evaluate with the local model. Make sure Ollama is running.",
-      hint: "Start Ollama and pull a model (e.g., qwen2.5-coder:7b), then retry."
+      hint: "Start Ollama and pull a model (e.g., llama3.1:8b), then retry."
     });
   }
 });
