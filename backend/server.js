@@ -16,12 +16,13 @@ app.use(cors({
 app.use(express.json({ limit: "1mb" }));
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.1:latest";
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen2.5-coder:1.5b";
 const AI_PROVIDER = process.env.AI_PROVIDER || "ollama"; // ollama | gemini | auto
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
 const AI_TEMPERATURE = Number(process.env.AI_TEMPERATURE || 0.2);
 const AI_MAX_TOKENS = Number(process.env.AI_MAX_TOKENS || 1024);
+const OLLAMA_TIMEOUT_MS = 15000; // 15s connection timeout for Ollama
 
 const writeSse = (res, data) => {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
@@ -91,8 +92,22 @@ const geminiStreamToSse = async ({ system, userText }, res) => {
   writeSse(res, { type: "done" });
 };
 
+const ollamaFetch = (url, options = {}) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs || OLLAMA_TIMEOUT_MS);
+  return fetch(url, { ...options, signal: controller.signal })
+    .then(res => { clearTimeout(timeout); return res; })
+    .catch(err => {
+      clearTimeout(timeout);
+      if (err.name === "AbortError") {
+        throw new Error(`Ollama is not responding (timed out after ${(options.timeoutMs || OLLAMA_TIMEOUT_MS) / 1000}s). Is Ollama running?`);
+      }
+      throw new Error(`Cannot connect to Ollama at ${OLLAMA_BASE_URL}. Make sure Ollama is running.`);
+    });
+};
+
 const listOllamaModels = async () => {
-  const res = await fetch(`${OLLAMA_BASE_URL}/api/tags`, { method: "GET" });
+  const res = await ollamaFetch(`${OLLAMA_BASE_URL}/api/tags`, { method: "GET" });
   if (!res.ok) return [];
   const json = await res.json().catch(() => ({}));
   const models = Array.isArray(json.models) ? json.models : [];
@@ -100,10 +115,11 @@ const listOllamaModels = async () => {
 };
 
 const pullOllamaModel = async (model) => {
-  const res = await fetch(`${OLLAMA_BASE_URL}/api/pull`, {
+  const res = await ollamaFetch(`${OLLAMA_BASE_URL}/api/pull`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ model, stream: false })
+    body: JSON.stringify({ model, stream: false }),
+    timeoutMs: 120000 // 2 min for pulling
   });
   return res.ok;
 };
@@ -120,7 +136,22 @@ const pickWorkingModel = async () => {
 
 const ollamaStreamToSse = async ({ system, userText }, res) => {
   const prompt = `${system || ""}\n\n${userText || ""}`.trim();
-  const modelToUse = await pickWorkingModel();
+
+  // Phase 1: Connecting
+  writeSse(res, { type: "phase", phase: "connecting", label: "Connecting to AI..." });
+
+  let modelToUse;
+  try {
+    modelToUse = await pickWorkingModel();
+  } catch (e) {
+    writeSse(res, {
+      type: "error",
+      error: e?.message || "Cannot connect to Ollama. Make sure Ollama is running on your machine."
+    });
+    writeSse(res, { type: "done" });
+    return;
+  }
+
   if (!modelToUse) {
     writeSse(res, {
       type: "error",
@@ -132,15 +163,29 @@ const ollamaStreamToSse = async ({ system, userText }, res) => {
   }
   writeSse(res, { type: "meta", model: modelToUse });
 
-  const upstream = await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      model: modelToUse,
-      prompt,
-      stream: true
-    })
-  });
+  // Phase 2: Thinking
+  writeSse(res, { type: "phase", phase: "thinking", label: "AI is thinking..." });
+
+  let upstream;
+  try {
+    upstream = await ollamaFetch(`${OLLAMA_BASE_URL}/api/generate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: modelToUse,
+        prompt,
+        stream: true
+      }),
+      timeoutMs: 120000 // 120s for initial response (large models can be slow)
+    });
+  } catch (e) {
+    writeSse(res, {
+      type: "error",
+      error: e?.message || "Ollama request timed out. The model may still be loading."
+    });
+    writeSse(res, { type: "done" });
+    return;
+  }
 
   if (!upstream.ok || !upstream.body) {
     const text = await upstream.text().catch(() => "");
@@ -152,9 +197,13 @@ const ollamaStreamToSse = async ({ system, userText }, res) => {
     return;
   }
 
+  // Phase 3: Writing
+  writeSse(res, { type: "phase", phase: "writing", label: "Generating response..." });
+
   const reader = upstream.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let firstToken = true;
 
   while (true) {
     // eslint-disable-next-line no-await-in-loop
@@ -170,7 +219,13 @@ const ollamaStreamToSse = async ({ system, userText }, res) => {
       if (!line) continue;
       try {
         const evt = JSON.parse(line);
-        if (evt.response) writeSse(res, { type: "delta", text: evt.response });
+        if (evt.response) {
+          if (firstToken) {
+            writeSse(res, { type: "phase", phase: "streaming", label: "Streaming response..." });
+            firstToken = false;
+          }
+          writeSse(res, { type: "delta", text: evt.response });
+        }
         if (evt.done) writeSse(res, { type: "done" });
       } catch {
         // ignore
@@ -735,6 +790,26 @@ ${code || ""}`.trim();
       message: "Try Again",
       feedback: "Unable to evaluate with the local model. Make sure Ollama is running.",
       hint: "Start Ollama and pull a model (e.g., llama3.1:8b), then retry."
+    });
+  }
+});
+
+// Health check endpoint — lets the frontend know if Ollama is reachable
+app.get("/api/health", async (_req, res) => {
+  try {
+    const models = await listOllamaModels();
+    res.json({
+      status: "ok",
+      provider: AI_PROVIDER,
+      ollama: { reachable: true, models, configured: OLLAMA_MODEL },
+      gemini: { configured: !!GEMINI_API_KEY }
+    });
+  } catch (e) {
+    res.json({
+      status: "degraded",
+      provider: AI_PROVIDER,
+      ollama: { reachable: false, error: e?.message || "Cannot reach Ollama" },
+      gemini: { configured: !!GEMINI_API_KEY }
     });
   }
 });

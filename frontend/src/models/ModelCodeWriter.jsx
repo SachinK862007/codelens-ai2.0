@@ -4,6 +4,7 @@ import FlowchartDiagram from "../components/FlowchartDiagram.jsx";
 import { streamClaudeJson } from "../lib/claudeStream.js";
 import { extractJsonString, safeJsonParse } from "../lib/partialJson.js";
 import AILoadingAnimation, { AISkeletonLoader } from "../components/AILoadingAnimation.jsx";
+import AIResponseCard from "../components/AIResponseCard.jsx";
 
 const LANGUAGES = [
   { id: "c", label: "C", icon: "C" },
@@ -51,6 +52,9 @@ export default function ModelCodeWriter({ onSaveHistory }) {
   const [data, setData] = useState(null);
   const [liveLogic, setLiveLogic] = useState("");
   const [error, setError] = useState("");
+  const [phase, setPhase] = useState("thinking");
+  const [phaseLabel, setPhaseLabel] = useState("");
+  const [rawFallback, setRawFallback] = useState("");
   const abortRef = useRef(null);
 
   const langMeta = useMemo(
@@ -74,6 +78,9 @@ export default function ModelCodeWriter({ onSaveHistory }) {
     setError("");
     setData(null);
     setLiveLogic("");
+    setPhase("thinking");
+    setPhaseLabel("");
+    setRawFallback("");
 
     const userText = `Language: ${lang}\n\nTask:\n${prompt}\n\nReturn the JSON only.`;
     let collected = "";
@@ -83,6 +90,10 @@ export default function ModelCodeWriter({ onSaveHistory }) {
         system: SYSTEM_PROMPT,
         userText,
         signal: ac.signal,
+        onPhase: (p, label) => {
+          setPhase(p);
+          if (label) setPhaseLabel(label);
+        },
         onDelta: (t) => {
           collected += t;
           const logic = extractJsonString(collected, "logic_explanation");
@@ -99,7 +110,7 @@ export default function ModelCodeWriter({ onSaveHistory }) {
           response: (finalParsed.code || "").slice(0, 220)
         });
       } else {
-        setError("AI response could not be parsed. Please try again.");
+        setRawFallback(collected);
       }
     } catch (e) {
       if (e?.name === "AbortError") return;
@@ -169,8 +180,9 @@ export default function ModelCodeWriter({ onSaveHistory }) {
 
         {loading && (
           <AILoadingAnimation
-            message="Writing your code..."
-            subtext="Generating code, algorithm, flowchart & complexity analysis"
+            phase={phase}
+            phaseLabel={phaseLabel}
+            variant="codewriter"
           />
         )}
       </div>
@@ -212,6 +224,8 @@ export default function ModelCodeWriter({ onSaveHistory }) {
               <FlowchartDiagram flowchart={data.flowchart} />
             </div>
           </div>
+        ) : rawFallback ? (
+          <AIResponseCard text={rawFallback} variant="codewriter" />
         ) : (
           <div className="empty-state">Generate code to see structured output.</div>
         )}

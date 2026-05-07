@@ -4,6 +4,10 @@ import { safeJsonParse } from "../lib/partialJson.js";
 import CodeBlock from "../components/CodeBlock.jsx";
 import LineNumberedCodeBlock from "../components/LineNumberedCodeBlock.jsx";
 import AILoadingAnimation, { AISkeletonLoader } from "../components/AILoadingAnimation.jsx";
+import AIResponseCard from "../components/AIResponseCard.jsx";
+
+const renderText = (val, fallback = "") => 
+  typeof val === "object" && val !== null ? JSON.stringify(val) : (val || fallback);
 
 const SYSTEM_PROMPT = `You are CodeLens.ai Smart Error Debugger.
 Respond ONLY in JSON format with keys:
@@ -30,6 +34,9 @@ export default function ModelTwo({ onSaveHistory, onRunInVisualizer }) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [phase, setPhase] = useState("thinking");
+  const [phaseLabel, setPhaseLabel] = useState("");
+  const [rawFallback, setRawFallback] = useState("");
   const abortRef = useRef(null);
 
   const handleFile = (event) => {
@@ -53,6 +60,9 @@ export default function ModelTwo({ onSaveHistory, onRunInVisualizer }) {
     setLoading(true);
     setResult(null);
     setError("");
+    setPhase("thinking");
+    setPhaseLabel("");
+    setRawFallback("");
 
     const userText = `Language (user selected): ${language}
 
@@ -65,6 +75,10 @@ ${src}`.trim();
         system: SYSTEM_PROMPT,
         userText,
         signal: ac.signal,
+        onPhase: (p, label) => {
+          setPhase(p);
+          if (label) setPhaseLabel(label);
+        },
         onDelta: (t) => {
           collected += t;
         }
@@ -79,7 +93,8 @@ ${src}`.trim();
           response: (parsed.corrected_code || "").slice(0, 200)
         });
       } else {
-        setError("AI response could not be parsed. Please try again.");
+        // Show formatted output instead of raw text
+        setRawFallback(collected);
       }
     } catch (e) {
       if (e?.name === "AbortError") return;
@@ -131,8 +146,9 @@ ${src}`.trim();
 
         {loading && (
           <AILoadingAnimation
-            message="Analyzing your code..."
-            subtext="Detecting errors and generating fixes"
+            phase={phase}
+            phaseLabel={phaseLabel}
+            variant="debugger"
           />
         )}
       </div>
@@ -155,25 +171,25 @@ ${src}`.trim();
                   {result.errors.map((e, i) => (
                     <div className="card" key={`${i}-${e.line_number}`} style={{ marginTop: 10 }}>
                       <div className="writer-badges">
-                        <span className="badge mono">{e.error_type || "Error"}</span>
-                        <span className="badge">Line {e.line_number}</span>
+                        <span className="badge mono">{renderText(e.error_type, "Error")}</span>
+                        <span className="badge">Line {renderText(e.line_number, "Unknown")}</span>
                       </div>
                       <div className="diff-row" style={{ marginTop: 10 }}>
                         <div className="diff-cell bad">
                           <div className="section-label">Wrong line</div>
-                          <pre className="badline-pre" style={{ color: "#7a1f1f", background: "transparent", border: "none" }}>
-                            {e.wrong_line || ""}
+                          <pre className="badline-pre" style={{ color: "#7a1f1f", background: "transparent", border: "none", overflowX: "auto" }}>
+                            {renderText(e.wrong_line)}
                           </pre>
                         </div>
                         <div className="diff-cell good">
                           <div className="section-label">Corrected line</div>
-                          <pre className="badline-pre" style={{ color: "#1f6f45", background: "transparent", border: "none" }}>
-                            {e.corrected_line || ""}
+                          <pre className="badline-pre" style={{ color: "#1f6f45", background: "transparent", border: "none", overflowX: "auto" }}>
+                            {renderText(e.corrected_line)}
                           </pre>
                         </div>
                       </div>
                       <div className="section-label">Explanation</div>
-                      <p className="para">{e.explanation || ""}</p>
+                      <p className="para">{renderText(e.explanation)}</p>
                     </div>
                   ))}
                 </div>
@@ -206,6 +222,8 @@ ${src}`.trim();
               <CodeBlock title="Expected output" language="text" code={result.execution_output || ""} />
             </div>
           </div>
+        ) : rawFallback ? (
+          <AIResponseCard text={rawFallback} variant="debugger" />
         ) : (
           <div className="empty-state">Run analysis to see the structured report.</div>
         )}

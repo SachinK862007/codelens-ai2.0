@@ -4,6 +4,7 @@ import { streamClaudeJson } from "../lib/claudeStream.js";
 import { PRACTICE_LANGUAGES, PRACTICE_QUESTIONS } from "../data/practiceQuestions.js";
 import { extractJsonBool, extractJsonString, safeJsonParse } from "../lib/partialJson.js";
 import AILoadingAnimation from "../components/AILoadingAnimation.jsx";
+import AIResponseCard from "../components/AIResponseCard.jsx";
 
 const SYSTEM_PROMPT = `Evaluate if the user's code correctly solves the problem.
 Output comparison is CASE INSENSITIVE. Check the LOGIC, not exact character match.
@@ -26,6 +27,9 @@ export default function ModelFour({ onSaveHistory }) {
   const [livePassed, setLivePassed] = useState(null);
   const [error, setError] = useState("");
   const [passedFlash, setPassedFlash] = useState(false);
+  const [phase, setPhase] = useState("thinking");
+  const [phaseLabel, setPhaseLabel] = useState("");
+  const [rawFallback, setRawFallback] = useState("");
   const abortRef = useRef(null);
   const advanceTimerRef = useRef(null);
 
@@ -66,6 +70,9 @@ export default function ModelFour({ onSaveHistory }) {
     setLiveFeedback("");
     setLiveHint("");
     setLivePassed(null);
+    setPhase("thinking");
+    setPhaseLabel("");
+    setRawFallback("");
 
     const userText = `Language: ${language}
 Problem:
@@ -82,6 +89,10 @@ ${src}`;
         system: SYSTEM_PROMPT,
         userText,
         signal: ac.signal,
+        onPhase: (p, label) => {
+          setPhase(p);
+          if (label) setPhaseLabel(label);
+        },
         onDelta: (t) => {
           collected += t;
           // Extract partial values for live feedback while streaming
@@ -118,7 +129,7 @@ ${src}`;
         if (liveFeedback) {
           setResult({ passed: livePassed || false, feedback: liveFeedback, hint: liveHint || "" });
         } else {
-          setError("AI response could not be parsed. Please try again.");
+          setRawFallback(collected);
         }
       }
     } catch (e) {
@@ -204,8 +215,9 @@ ${src}`;
 
         {loading && (
           <AILoadingAnimation
-            message="Evaluating your solution..."
-            subtext="Checking logic and correctness"
+            phase={phase}
+            phaseLabel={phaseLabel}
+            variant="practice"
           />
         )}
       </div>
@@ -248,6 +260,7 @@ ${src}`;
                   setLiveFeedback("");
                   setLiveHint("");
                   setLivePassed(null);
+                  setRawFallback("");
                 }}
                 disabled={loading || !(result?.passed ?? livePassed) || index >= total - 1}
               >
@@ -255,6 +268,8 @@ ${src}`;
               </button>
             </div>
           </div>
+        ) : rawFallback ? (
+          <AIResponseCard text={rawFallback} variant="practice" />
         ) : (
           <div className="empty-state">Run a check to see feedback and hints.</div>
         )}

@@ -1,8 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef } from "react";
 import mermaid from "mermaid";
-import { Terminal } from "xterm";
-import { FitAddon } from "xterm-addon-fit";
-import "xterm/css/xterm.css";
+import SimpleTerminal from "../components/SimpleTerminal.jsx";
 
 const DEFAULT_CODE = `# Write your code here
 name = input("Enter your name: ")
@@ -13,7 +11,7 @@ export default function ModelOne({ onSaveHistory, runnerPrefill }) {
   const [code, setCode] = useState(DEFAULT_CODE);
   const [intent, setIntent] = useState("");
   const [loading, setLoading] = useState(false);
-  const [wsReady, setWsReady] = useState(false);
+  const [terminalVisible, setTerminalVisible] = useState(true);
   const [result, setResult] = useState(null);
   const [activeLine, setActiveLine] = useState(0);
   const [videoUrl, setVideoUrl] = useState("");
@@ -21,13 +19,7 @@ export default function ModelOne({ onSaveHistory, runnerPrefill }) {
   const flowchartRef = useRef(null);
   const [algoOpen, setAlgoOpen] = useState(false);
   const [videoOpen, setVideoOpen] = useState(false);
-  const [stdinBuffer, setStdinBuffer] = useState("");
-
-  const terminalRef = useRef(null);
-  const xtermRef = useRef(null);
-  const wsRef = useRef(null);
-  const fitAddonRef = useRef(null);
-  const liveInputRef = useRef("");
+  const simpleTerminalRef = useRef(null);
 
   const codeLines = useMemo(() => code.split("\n"), [code]);
 
@@ -37,64 +29,7 @@ export default function ModelOne({ onSaveHistory, runnerPrefill }) {
     setCode(runnerPrefill.code);
   }, [runnerPrefill?.ts]); // re-run on new prefill
 
-  useEffect(() => {
-    if (terminalRef.current && !xtermRef.current) {
-      const term = new Terminal({
-        theme: {
-          background: '#201532',
-          foreground: '#f6efff',
-          cursor: '#d9c7ff',
-          selectionBackground: 'rgba(217, 199, 255, 0.3)'
-        },
-        fontFamily: '"Consolas", "Courier New", monospace',
-        fontSize: 13,
-        cursorBlink: true,
-        convertEol: true
-      });
-      const fitAddon = new FitAddon();
-      term.loadAddon(fitAddon);
-      term.open(terminalRef.current);
-      fitAddon.fit();
-      xtermRef.current = term;
-      fitAddonRef.current = fitAddon;
-
-      term.onData(data => {
-        // Proper Backspace handling (xterm sends DEL \x7f)
-        if (data === "\u007f") {
-          if (liveInputRef.current.length > 0) {
-            liveInputRef.current = liveInputRef.current.slice(0, -1);
-            term.write("\b \b");
-          }
-          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({ type: "input", input: "\b" }));
-          }
-          return;
-        }
-
-        let payload = data;
-        if (data === "\r") {
-          term.write("\r\n");
-          payload = "\n";
-          liveInputRef.current = "";
-        } else if (data >= " " && data !== "\x1b") {
-          // printable characters
-          liveInputRef.current += data;
-          term.write(data);
-        } else {
-          // control sequences
-          term.write(data);
-        }
-
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({ type: 'input', input: payload }));
-        }
-      });
-
-      const handleResize = () => fitAddon.fit();
-      window.addEventListener('resize', handleResize);
-      return () => window.removeEventListener('resize', handleResize);
-    }
-  }, []);
+  // SimpleTerminal manages its own WebSocket and rendering lifecycle.
 
   useEffect(() => {
     if (!result?.steps?.length) return undefined;
@@ -145,74 +80,16 @@ export default function ModelOne({ onSaveHistory, runnerPrefill }) {
 
   const runCode = async () => {
     setLoading(true);
-    setWsReady(false);
     setVideoUrl("");
     setVideoStatus("");
+    setTerminalVisible(true);
 
-    if (xtermRef.current) {
-      xtermRef.current.clear();
-      xtermRef.current.reset();
-      xtermRef.current.focus();
+    if (simpleTerminalRef.current) {
+      simpleTerminalRef.current.run();
     }
-
-    if (wsRef.current) {
-      wsRef.current.close();
-    }
-
-    fetchAnalysis(); // Generates background flowchart for the modal
-
-    const ws = new WebSocket("ws://localhost:8000");
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      setWsReady(true);
-      ws.send(JSON.stringify({ type: "init", language, code }));
-    };
-
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      if (msg.type === "output") {
-        xtermRef.current?.write(msg.data);
-      } else if (msg.type === "exit") {
-        setLoading(false);
-        setWsReady(false);
-        ws.close();
-        onSaveHistory({
-          title: "Interactive execution",
-          prompt: code,
-          response: `Process exited with code ${msg.code}`
-        });
-      }
-    };
-
-    ws.onerror = () => {
-      xtermRef.current?.write("\r\n\x1b[31mFailed to connect to Local Execution Engine.\x1b[0m\r\n");
-      setLoading(false);
-      setWsReady(false);
-    };
-    ws.onclose = () => setWsReady(false);
-  };
-
-  const sendStdinLine = () => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    const text = stdinBuffer;
-    if (!text) return;
-    wsRef.current.send(JSON.stringify({ type: "input", input: text + "\n" }));
-    xtermRef.current?.write(text + "\r\n");
-    setStdinBuffer("");
-  };
-
-  const onStdinKeyDown = (e) => {
-    // Requirement: bind Backspace keydown to delete last character (keyCode 8).
-    if (e.keyCode === 8) {
-      e.preventDefault();
-      setStdinBuffer((prev) => prev.slice(0, -1));
-      return;
-    }
-    if (e.key === "Enter") {
-      e.preventDefault();
-      sendStdinLine();
-    }
+    
+    await fetchAnalysis();
+    setLoading(false);
   };
 
   const generatePlaybackVideo = async () => {
@@ -561,22 +438,14 @@ export default function ModelOne({ onSaveHistory, runnerPrefill }) {
         <div className="panel-subtitle">
           Type directly into the console to interact with your program!
         </div>
-        <div className="output-card terminal-card" style={{ padding: '8px' }}>
-          <div ref={terminalRef} style={{ width: '100%', height: '340px' }} />
-        </div>
-        <div className="field-row" style={{ marginTop: 10 }}>
-          <label>Terminal input</label>
-          <input
-            value={stdinBuffer}
-            onChange={(e) => setStdinBuffer(e.target.value)}
-            onKeyDown={onStdinKeyDown}
-            placeholder={wsReady ? "Type input here and press Enter…" : "Run the program first to enable input…"}
-            spellCheck={false}
-            disabled={!wsReady}
+        <div className="output-card terminal-card" style={{ padding: '8px', minHeight: '340px' }}>
+          <SimpleTerminal
+            ref={simpleTerminalRef}
+            code={code}
+            language={language}
+            visible={terminalVisible}
+            onVisibilityChange={setTerminalVisible}
           />
-          <button className="ghost-button" type="button" onClick={sendStdinLine} disabled={!wsReady || !stdinBuffer}>
-            Send
-          </button>
         </div>
       </div>
 

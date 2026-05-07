@@ -2,6 +2,7 @@ import React, { useRef, useState } from "react";
 import { streamClaudeJson } from "../lib/claudeStream.js";
 import { safeJsonParse } from "../lib/partialJson.js";
 import AILoadingAnimation, { AISkeletonLoader } from "../components/AILoadingAnimation.jsx";
+import AIResponseCard from "../components/AIResponseCard.jsx";
 
 const SYSTEM_PROMPT = `You are CodeLens.ai Project Roadmap Generator.
 
@@ -33,6 +34,9 @@ export default function ModelThree({ onSaveHistory }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [refineText, setRefineText] = useState("");
+  const [phase, setPhase] = useState("thinking");
+  const [phaseLabel, setPhaseLabel] = useState("");
+  const [rawFallback, setRawFallback] = useState("");
   const abortRef = useRef(null);
 
   const buildPlan = async ({ refine = false } = {}) => {
@@ -49,6 +53,9 @@ export default function ModelThree({ onSaveHistory }) {
     setLoading(true);
     setError("");
     setResult(null);
+    setPhase("thinking");
+    setPhaseLabel("");
+    setRawFallback("");
 
     const context = refine && result ? JSON.stringify(result) : "";
     const refinePart = refine ? (refineText || "").trim() : "";
@@ -63,6 +70,10 @@ export default function ModelThree({ onSaveHistory }) {
         system: SYSTEM_PROMPT,
         userText,
         signal: ac.signal,
+        onPhase: (p, label) => {
+          setPhase(p);
+          if (label) setPhaseLabel(label);
+        },
         onDelta: (t) => {
           collected += t;
         }
@@ -77,7 +88,7 @@ export default function ModelThree({ onSaveHistory }) {
           response: (parsed.project_title || "").slice(0, 180)
         });
       } else {
-        setError("AI response could not be parsed. Please try again.");
+        setRawFallback(collected);
       }
     } catch (e) {
       if (e?.name === "AbortError") return;
@@ -135,8 +146,9 @@ export default function ModelThree({ onSaveHistory }) {
 
         {loading && (
           <AILoadingAnimation
-            message="Building your roadmap..."
-            subtext="Generating tech stack, APIs, phases & deployment plan"
+            phase={phase}
+            phaseLabel={phaseLabel}
+            variant="roadmap"
           />
         )}
       </div>
@@ -158,8 +170,8 @@ export default function ModelThree({ onSaveHistory }) {
             <div className="card">
               <div className="section-label">Recommended Tech Stack</div>
               <ul className="steps-list">
-                {(result.recommended_tech_stack || []).map((s) => (
-                  <li key={s}>{s}</li>
+                {(result.recommended_tech_stack || []).map((s, i) => (
+                  <li key={i}>{typeof s === 'object' ? JSON.stringify(s) : s}</li>
                 ))}
               </ul>
             </div>
@@ -168,15 +180,15 @@ export default function ModelThree({ onSaveHistory }) {
               <div className="section-label">Recommended APIs</div>
               {Array.isArray(result.recommended_apis) && result.recommended_apis.length ? (
                 <ul className="steps-list">
-                  {result.recommended_apis.map((a) => (
-                    <li key={a.name + a.link}>
-                      <strong>{a.name}</strong>{" "}
-                      {a.link ? (
+                  {result.recommended_apis.map((a, i) => (
+                    <li key={i}>
+                      <strong>{a.name || "API"}</strong>{" "}
+                      {a.link && typeof a.link === "string" ? (
                         <a href={a.link} target="_blank" rel="noreferrer">
                           {a.link}
                         </a>
                       ) : null}
-                      {a.why ? <div className="muted" style={{ marginTop: 4 }}>{a.why}</div> : null}
+                      {a.why ? <div className="muted" style={{ marginTop: 4 }}>{typeof a.why === 'object' ? JSON.stringify(a.why) : a.why}</div> : null}
                     </li>
                   ))}
                 </ul>
@@ -189,11 +201,11 @@ export default function ModelThree({ onSaveHistory }) {
               <div className="section-label">Research papers / references</div>
               {Array.isArray(result.research_references) && result.research_references.length ? (
                 <ul className="steps-list">
-                  {result.research_references.map((r) => (
-                    <li key={r.title}>
-                      <strong>{r.title}</strong>
-                      {r.where_to_find ? <div className="muted" style={{ marginTop: 4 }}>{r.where_to_find}</div> : null}
-                      {r.why_relevant ? <div className="muted" style={{ marginTop: 4 }}>{r.why_relevant}</div> : null}
+                  {result.research_references.map((r, i) => (
+                    <li key={i}>
+                      <strong>{r.title || "Reference"}</strong>
+                      {r.where_to_find ? <div className="muted" style={{ marginTop: 4 }}>{typeof r.where_to_find === 'object' ? JSON.stringify(r.where_to_find) : r.where_to_find}</div> : null}
+                      {r.why_relevant ? <div className="muted" style={{ marginTop: 4 }}>{typeof r.why_relevant === 'object' ? JSON.stringify(r.why_relevant) : r.why_relevant}</div> : null}
                     </li>
                   ))}
                 </ul>
@@ -211,25 +223,25 @@ export default function ModelThree({ onSaveHistory }) {
                 borderRadius: "12px",
                 fontSize: "12px",
                 fontFamily: '"Consolas", monospace',
-                whiteSpace: "pre-wrap",
+                whiteSpace: "pre",
                 maxHeight: 320,
-                overflowY: "auto"
-              }}>{result.file_folder_structure}</pre>
+                overflow: "auto"
+              }}>{typeof result.file_folder_structure === 'object' ? JSON.stringify(result.file_folder_structure, null, 2) : result.file_folder_structure}</pre>
             </div>
 
             <div className="card">
               <div className="section-label">Build phases</div>
               {Array.isArray(result.phases) && result.phases.length ? (
                 <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
-                  {result.phases.map((p) => (
-                    <div className="card" key={p.name}>
+                  {result.phases.map((p, i) => (
+                    <div className="card" key={i}>
                       <div className="writer-badges">
-                        <span className="badge">{p.name}</span>
-                        <span className="badge">ETA: {p.estimated_time}</span>
+                        <span className="badge">{p.name || `Phase ${i+1}`}</span>
+                        <span className="badge">ETA: {p.estimated_time || "N/A"}</span>
                       </div>
                       <ul className="steps-list">
-                        {(p.tasks || []).map((t) => (
-                          <li key={t}>{t}</li>
+                        {(p.tasks || []).map((t, j) => (
+                          <li key={j}>{typeof t === 'object' ? JSON.stringify(t) : t}</li>
                         ))}
                       </ul>
                     </div>
@@ -243,12 +255,14 @@ export default function ModelThree({ onSaveHistory }) {
             <div className="card">
               <div className="section-label">Hosting / deployment</div>
               <ul className="steps-list">
-                {(result.deployment || []).map((d) => (
-                  <li key={d}>{d}</li>
+                {(result.deployment || []).map((d, i) => (
+                  <li key={i}>{typeof d === 'object' ? JSON.stringify(d) : d}</li>
                 ))}
               </ul>
             </div>
           </div>
+        ) : rawFallback ? (
+          <AIResponseCard text={rawFallback} variant="roadmap" />
         ) : (
           <div className="empty-state">Generate a plan to see details.</div>
         )}
