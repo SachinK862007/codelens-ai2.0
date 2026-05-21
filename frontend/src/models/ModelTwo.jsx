@@ -1,6 +1,7 @@
 import React, { useRef, useState } from "react";
 import { streamClaudeJson } from "../lib/claudeStream.js";
 import { safeJsonParse } from "../lib/partialJson.js";
+import { detectStreamProgress } from "../lib/streamProgress.js";
 import CodeBlock from "../components/CodeBlock.jsx";
 import LineNumberedCodeBlock from "../components/LineNumberedCodeBlock.jsx";
 import AILoadingAnimation, { AISkeletonLoader } from "../components/AILoadingAnimation.jsx";
@@ -36,6 +37,7 @@ export default function ModelTwo({ onSaveHistory, onRunInVisualizer }) {
   const [error, setError] = useState("");
   const [phase, setPhase] = useState("thinking");
   const [phaseLabel, setPhaseLabel] = useState("");
+  const [streamProgress, setStreamProgress] = useState([]);
   const [rawFallback, setRawFallback] = useState("");
   const abortRef = useRef(null);
 
@@ -62,6 +64,7 @@ export default function ModelTwo({ onSaveHistory, onRunInVisualizer }) {
     setError("");
     setPhase("thinking");
     setPhaseLabel("");
+    setStreamProgress([]);
     setRawFallback("");
 
     const userText = `Language (user selected): ${language}
@@ -81,6 +84,7 @@ ${src}`.trim();
         },
         onDelta: (t) => {
           collected += t;
+          setStreamProgress(detectStreamProgress(collected, "debugger"));
         }
       });
 
@@ -149,6 +153,7 @@ ${src}`.trim();
             phase={phase}
             phaseLabel={phaseLabel}
             variant="debugger"
+            streamProgress={streamProgress}
           />
         )}
       </div>

@@ -3,6 +3,7 @@ import CodeBlock from "../components/CodeBlock.jsx";
 import FlowchartDiagram from "../components/FlowchartDiagram.jsx";
 import { streamClaudeJson } from "../lib/claudeStream.js";
 import { extractJsonString, safeJsonParse } from "../lib/partialJson.js";
+import { detectStreamProgress } from "../lib/streamProgress.js";
 import AILoadingAnimation, { AISkeletonLoader } from "../components/AILoadingAnimation.jsx";
 import AIResponseCard from "../components/AIResponseCard.jsx";
 
@@ -54,6 +55,7 @@ export default function ModelCodeWriter({ onSaveHistory }) {
   const [error, setError] = useState("");
   const [phase, setPhase] = useState("thinking");
   const [phaseLabel, setPhaseLabel] = useState("");
+  const [streamProgress, setStreamProgress] = useState([]);
   const [rawFallback, setRawFallback] = useState("");
   const abortRef = useRef(null);
 
@@ -80,6 +82,7 @@ export default function ModelCodeWriter({ onSaveHistory }) {
     setLiveLogic("");
     setPhase("thinking");
     setPhaseLabel("");
+    setStreamProgress([]);
     setRawFallback("");
 
     const userText = `Language: ${lang}\n\nTask:\n${prompt}\n\nReturn the JSON only.`;
@@ -98,6 +101,7 @@ export default function ModelCodeWriter({ onSaveHistory }) {
           collected += t;
           const logic = extractJsonString(collected, "logic_explanation");
           if (logic != null) setLiveLogic(logic);
+          setStreamProgress(detectStreamProgress(collected, "codewriter"));
         }
       });
 
@@ -183,6 +187,7 @@ export default function ModelCodeWriter({ onSaveHistory }) {
             phase={phase}
             phaseLabel={phaseLabel}
             variant="codewriter"
+            streamProgress={streamProgress}
           />
         )}
       </div>

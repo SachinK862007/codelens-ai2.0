@@ -2,14 +2,23 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
 import { streamClaudeJson } from "../lib/claudeStream.js";
 import { PRACTICE_LANGUAGES, PRACTICE_QUESTIONS } from "../data/practiceQuestions.js";
-import { extractJsonBool, extractJsonString, safeJsonParse } from "../lib/partialJson.js";
+import { detectStreamProgress } from "../lib/streamProgress.js";
+import { parsePracticeResponse } from "../lib/practiceParse.js";
+import { tryLocalPracticeGrade } from "../lib/practiceGrade.js";
 import AILoadingAnimation from "../components/AILoadingAnimation.jsx";
 import AIResponseCard from "../components/AIResponseCard.jsx";
 
-const SYSTEM_PROMPT = `Evaluate if the user's code correctly solves the problem.
-Output comparison is CASE INSENSITIVE. Check the LOGIC, not exact character match.
-Return JSON only: { "passed": true/false, "feedback": "...", "hint": "..." }.
-Do not reveal the final full answer code.`;
+const SYSTEM_PROMPT = `You are CodeLens Practice Grader. Reply with ONLY one JSON object — no markdown, no explanation before or after.
+
+{"passed":true,"feedback":"short sentence","hint":"short hint or empty string"}
+
+Rules:
+- Grade LOGIC and behavior, NOT exact output text, spacing, or punctuation.
+- Output comparison is CASE INSENSITIVE.
+- Accept any correct approach (different variable names, formatting, or wording).
+- For greeting tasks: any clear greeting output passes (Hello, Hi, etc.).
+- passed must be boolean true or false only.
+- Do not include the full solution code in feedback or hint.`;
 
 function ordered(arr) {
   return [...arr];
@@ -29,6 +38,7 @@ export default function ModelFour({ onSaveHistory }) {
   const [passedFlash, setPassedFlash] = useState(false);
   const [phase, setPhase] = useState("thinking");
   const [phaseLabel, setPhaseLabel] = useState("");
+  const [streamProgress, setStreamProgress] = useState([]);
   const [rawFallback, setRawFallback] = useState("");
   const abortRef = useRef(null);
   const advanceTimerRef = useRef(null);
@@ -51,6 +61,35 @@ export default function ModelFour({ onSaveHistory }) {
   const total = order.length || 1;
   const progress = Math.round(((index) / total) * 100);
 
+  const scheduleAdvance = () => {
+    setPassedFlash(true);
+    if (advanceTimerRef.current) window.clearTimeout(advanceTimerRef.current);
+    advanceTimerRef.current = window.setTimeout(() => {
+      setPassedFlash(false);
+      setIndex((p) => Math.min(p + 1, total - 1));
+      setCode("");
+      setResult(null);
+      setLiveFeedback("");
+      setLiveHint("");
+      setLivePassed(null);
+    }, 2000);
+  };
+
+  const applyEvaluation = (evaluation) => {
+    setResult(evaluation);
+    setRawFallback("");
+
+    onSaveHistory?.({
+      title: evaluation.passed ? "Practice passed" : "Practice failed",
+      prompt: `${language} • ${question?.title || "Practice"}`,
+      response: evaluation.feedback || ""
+    });
+
+    if (evaluation.passed) {
+      scheduleAdvance();
+    }
+  };
+
   const runCheck = async () => {
     if (!question) return;
     const src = (code || "").trim();
@@ -72,6 +111,7 @@ export default function ModelFour({ onSaveHistory }) {
     setLivePassed(null);
     setPhase("thinking");
     setPhaseLabel("");
+    setStreamProgress([]);
     setRawFallback("");
 
     const userText = `Language: ${language}
@@ -82,6 +122,16 @@ ${question.expectedBehavior}
 
 User code:
 ${src}`;
+
+    // Fast local check (runs code, grades logic — no Ollama wait for simple tasks)
+    setPhase("thinking");
+    setPhaseLabel("Running your code...");
+    const localGrade = await tryLocalPracticeGrade(language, src, question);
+    if (localGrade) {
+      applyEvaluation(localGrade);
+      setLoading(false);
+      return;
+    }
 
     let collected = "";
     try {
@@ -95,42 +145,21 @@ ${src}`;
         },
         onDelta: (t) => {
           collected += t;
-          // Extract partial values for live feedback while streaming
-          const fb = extractJsonString(collected, "feedback");
-          const hint = extractJsonString(collected, "hint");
-          const passed = extractJsonBool(collected, "passed");
-          if (fb != null) setLiveFeedback(fb);
-          if (hint != null) setLiveHint(hint);
-          if (passed != null) setLivePassed(passed);
+          const partial = parsePracticeResponse(collected);
+          if (partial) {
+            if (partial.feedback) setLiveFeedback(partial.feedback);
+            setLiveHint(partial.hint || "");
+            setLivePassed(partial.passed);
+          }
+          setStreamProgress(detectStreamProgress(collected, "practice"));
         }
       });
 
-      const parsed = safeJsonParse(collected);
-      if (parsed) {
-        setResult(parsed);
-
-        onSaveHistory?.({
-          title: parsed.passed ? "Practice passed" : "Practice failed",
-          prompt: `${language} • ${question.title}`,
-          response: parsed.feedback || ""
-        });
-
-        if (parsed.passed) {
-          setPassedFlash(true);
-          advanceTimerRef.current = window.setTimeout(() => {
-            setPassedFlash(false);
-            setIndex((p) => Math.min(p + 1, total - 1));
-            setCode("");
-            setResult(null);
-          }, 2000);
-        }
+      const evaluation = parsePracticeResponse(collected);
+      if (evaluation) {
+        applyEvaluation(evaluation);
       } else {
-        // Use extracted values even if full parse failed
-        if (liveFeedback) {
-          setResult({ passed: livePassed || false, feedback: liveFeedback, hint: liveHint || "" });
-        } else {
-          setRawFallback(collected);
-        }
+        setRawFallback(collected);
       }
     } catch (e) {
       if (e?.name === "AbortError") return;
@@ -218,6 +247,7 @@ ${src}`;
             phase={phase}
             phaseLabel={phaseLabel}
             variant="practice"
+            streamProgress={streamProgress}
           />
         )}
       </div>

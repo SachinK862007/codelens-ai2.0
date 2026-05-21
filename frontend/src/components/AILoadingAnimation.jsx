@@ -1,60 +1,86 @@
 import React, { useEffect, useRef, useState } from "react";
 
-/**
- * Phase configuration per model type.
- * Each model gets contextual phase labels.
- */
 const PHASE_CONFIGS = {
-  default: [
-    { id: "connecting", icon: "🔗", label: "Connecting to AI..." },
-    { id: "thinking", icon: "🧠", label: "Thinking..." },
-    { id: "planning", icon: "📋", label: "Planning response..." },
-    { id: "writing", icon: "✍️", label: "Writing..." },
-    { id: "streaming", icon: "⚡", label: "Streaming response..." },
-    { id: "retrying", icon: "🔄", label: "Retrying..." }
-  ],
-  debugger: [
-    { id: "connecting", icon: "🔗", label: "Connecting to AI..." },
-    { id: "thinking", icon: "🔍", label: "Scanning code..." },
-    { id: "planning", icon: "🧪", label: "Analyzing errors..." },
-    { id: "writing", icon: "🔧", label: "Generating fixes..." },
-    { id: "streaming", icon: "⚡", label: "Streaming results..." },
-    { id: "retrying", icon: "🔄", label: "Retrying..." }
-  ],
-  roadmap: [
-    { id: "connecting", icon: "🔗", label: "Connecting to AI..." },
-    { id: "thinking", icon: "💡", label: "Understanding project..." },
-    { id: "planning", icon: "🗺️", label: "Designing roadmap..." },
-    { id: "writing", icon: "📝", label: "Building phases..." },
-    { id: "streaming", icon: "⚡", label: "Streaming roadmap..." },
-    { id: "retrying", icon: "🔄", label: "Retrying..." }
-  ],
-  practice: [
-    { id: "connecting", icon: "🔗", label: "Connecting to AI..." },
-    { id: "thinking", icon: "🧠", label: "Reading your code..." },
-    { id: "planning", icon: "⚖️", label: "Evaluating logic..." },
-    { id: "writing", icon: "📊", label: "Generating feedback..." },
-    { id: "streaming", icon: "⚡", label: "Streaming feedback..." },
-    { id: "retrying", icon: "🔄", label: "Retrying..." }
-  ],
-  codewriter: [
-    { id: "connecting", icon: "🔗", label: "Connecting to AI..." },
-    { id: "thinking", icon: "💭", label: "Understanding request..." },
-    { id: "planning", icon: "🏗️", label: "Designing algorithm..." },
-    { id: "writing", icon: "⌨️", label: "Writing code..." },
-    { id: "streaming", icon: "⚡", label: "Streaming code..." },
-    { id: "retrying", icon: "🔄", label: "Retrying..." }
-  ]
+  default: {
+    connecting: "Connecting to local AI",
+    thinking: "Understanding your request",
+    planning: "Planning the response",
+    writing: "Composing output",
+    streaming: "Delivering results",
+    retrying: "Reconnecting"
+  },
+  debugger: {
+    connecting: "Connecting to local AI",
+    thinking: "Reading your code",
+    planning: "Analyzing errors",
+    writing: "Generating fixes",
+    streaming: "Building report",
+    retrying: "Reconnecting"
+  },
+  roadmap: {
+    connecting: "Connecting to local AI",
+    thinking: "Understanding your project",
+    planning: "Designing roadmap",
+    writing: "Structuring phases",
+    streaming: "Assembling plan",
+    retrying: "Reconnecting"
+  },
+  practice: {
+    connecting: "Connecting to local AI",
+    thinking: "Reading your solution",
+    planning: "Evaluating logic",
+    writing: "Preparing feedback",
+    streaming: "Finalizing grade",
+    retrying: "Reconnecting"
+  },
+  codewriter: {
+    connecting: "Connecting to local AI",
+    thinking: "Understanding requirements",
+    planning: "Designing algorithm",
+    writing: "Writing code",
+    streaming: "Packaging output",
+    retrying: "Reconnecting"
+  }
 };
 
+const PHASE_ORDER = ["connecting", "thinking", "planning", "writing", "streaming"];
+
+function PhaseIcon({ phaseId, active }) {
+  const cls = `ai-phase-svg ${active ? "active" : ""}`;
+  if (phaseId === "connecting") {
+    return (
+      <svg className={cls} viewBox="0 0 16 16" aria-hidden="true">
+        <circle cx="8" cy="8" r="3" fill="currentColor" opacity="0.9" />
+        <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.2" opacity="0.5" />
+      </svg>
+    );
+  }
+  if (phaseId === "thinking") {
+    return (
+      <svg className={cls} viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M4 8a4 4 0 1 1 8 0" fill="none" stroke="currentColor" strokeWidth="1.4" />
+        <circle cx="6" cy="7" r="0.8" fill="currentColor" />
+        <circle cx="10" cy="7" r="0.8" fill="currentColor" />
+      </svg>
+    );
+  }
+  if (phaseId === "planning") {
+    return (
+      <svg className={cls} viewBox="0 0 16 16" aria-hidden="true">
+        <rect x="3" y="3" width="10" height="10" rx="2" fill="none" stroke="currentColor" strokeWidth="1.3" />
+        <path d="M5 6h6M5 8.5h4M5 11h5" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  return (
+    <svg className={cls} viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3 12L8 4l5 8" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 /**
- * Professional multi-phase AI loading animation.
- * Inspired by Claude, Gemini, and Cursor's thinking indicators.
- *
- * @param {string} props.phase - Current phase ID from the stream (connecting/thinking/writing/streaming)
- * @param {string} props.phaseLabel - Custom label from the backend (optional)
- * @param {string} props.variant - Model variant for contextual labels (debugger/roadmap/practice/codewriter)
- * @param {Array} props.streamProgress - Array of detected sections e.g. [{key:'code', label:'Code', icon:'💻'}]
+ * Professional multi-phase AI indicator (Claude / Gemini / Cursor style).
  */
 export default function AILoadingAnimation({
   phase = "thinking",
@@ -65,89 +91,81 @@ export default function AILoadingAnimation({
   const [elapsed, setElapsed] = useState(0);
   const startTimeRef = useRef(Date.now());
 
-  // Elapsed time counter
   useEffect(() => {
     startTimeRef.current = Date.now();
+    setElapsed(0);
     const timer = setInterval(() => {
       setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
     }, 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [phase]);
 
-  const config = PHASE_CONFIGS[variant] || PHASE_CONFIGS.default;
-  const currentPhaseConfig = config.find(p => p.id === phase) || config[1]; // default to thinking
-  const label = phaseLabel || currentPhaseConfig.label;
-  const icon = currentPhaseConfig.icon;
+  const labels = PHASE_CONFIGS[variant] || PHASE_CONFIGS.default;
+  const label = phaseLabel || labels[phase] || labels.thinking;
+  const currentIdx = PHASE_ORDER.indexOf(phase);
+  const orbMode = phase === "planning" ? "planning" : phase === "streaming" || phase === "writing" ? "writing" : "thinking";
 
-  // Determine which phases are completed
-  const phaseOrder = ["connecting", "thinking", "planning", "writing", "streaming"];
-  const currentIdx = phaseOrder.indexOf(phase);
-
-  const formatTime = (s) => {
-    if (s < 60) return `${s}s`;
-    return `${Math.floor(s / 60)}m ${s % 60}s`;
-  };
+  const formatTime = (s) => (s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`);
 
   return (
-    <div className="ai-thinking-container">
-      {/* Animated gradient border */}
+    <div className="ai-thinking-container" role="status" aria-live="polite" aria-label={label}>
       <div className="ai-thinking-border" />
-
       <div className="ai-thinking-content">
-        {/* Phase progress dots */}
         <div className="ai-thinking-phases">
-          {phaseOrder.slice(0, 4).map((p, i) => {
-            const phaseConfig = config.find(c => c.id === p) || config[0];
+          {PHASE_ORDER.slice(0, 4).map((p, i) => {
             const isActive = p === phase;
-            const isCompleted = i < currentIdx;
+            const isCompleted = currentIdx > i || (phase === "streaming" && i < 4);
+            const shortLabel = (labels[p] || p).split(" ").slice(0, 2).join(" ");
             return (
               <div
                 key={p}
                 className={`ai-phase-dot ${isActive ? "active" : ""} ${isCompleted ? "completed" : ""}`}
-                title={phaseConfig.label}
+                title={labels[p]}
               >
-                <span className="ai-phase-icon">{isCompleted ? "✓" : phaseConfig.icon}</span>
-                <span className="ai-phase-label">{phaseConfig.label.replace("...", "")}</span>
+                <span className="ai-phase-icon-wrap">
+                  {isCompleted && !isActive ? (
+                    <svg className="ai-phase-svg done" viewBox="0 0 16 16" aria-hidden="true">
+                      <path d="M3.5 8.2L6.5 11.2L12.5 5.2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                    </svg>
+                  ) : (
+                    <PhaseIcon phaseId={p} active={isActive} />
+                  )}
+                </span>
+                <span className="ai-phase-label">{shortLabel}</span>
               </div>
             );
           })}
         </div>
 
-        {/* Main thinking indicator */}
         <div className="ai-thinking-main">
-          <div className="ai-thinking-orb">
+          <div className={`ai-thinking-orb ai-orb-mode-${orbMode}`}>
+            <div className="ai-thinking-orb-glow" />
             <div className="ai-thinking-orb-inner" />
             <div className="ai-thinking-orb-ring" />
             <div className="ai-thinking-orb-ring ring-2" />
+            {orbMode === "planning" && <div className="ai-thinking-orb-pulse" />}
           </div>
 
           <div className="ai-thinking-info">
             <div className="ai-thinking-label">
-              <span className="ai-thinking-icon">{icon}</span>
               <span className="ai-thinking-text">{label}</span>
             </div>
             <div className="ai-thinking-meta">
               <span className="ai-thinking-elapsed">{formatTime(elapsed)}</span>
-              <span className="ai-thinking-dots">
-                <span></span><span></span><span></span>
+              <span className="ai-thinking-dots" aria-hidden="true">
+                <span /><span /><span />
               </span>
             </div>
           </div>
         </div>
 
-        {/* Smart progress checklist (replaces raw stream preview) */}
         {streamProgress.length > 0 && (
           <div className="ai-progress-checklist">
             <div className="ai-progress-label">Building your response</div>
             <div className="ai-progress-items">
               {streamProgress.map((item, i) => (
-                <div
-                  key={item.key}
-                  className="ai-progress-item"
-                  style={{ animationDelay: `${i * 0.1}s` }}
-                >
-                  <span className="ai-progress-check">✓</span>
-                  <span className="ai-progress-icon">{item.icon}</span>
+                <div key={item.key} className="ai-progress-item" style={{ animationDelay: `${i * 0.08}s` }}>
+                  <span className="ai-progress-check" aria-hidden="true" />
                   <span className="ai-progress-text">{item.label}</span>
                 </div>
               ))}
@@ -159,13 +177,9 @@ export default function AILoadingAnimation({
   );
 }
 
-/**
- * Premium skeleton loader for the output panel while AI is generating.
- * Shows code-like shapes with staggered shimmer.
- */
 export function AISkeletonLoader() {
   return (
-    <div className="ai-skeleton">
+    <div className="ai-skeleton" aria-hidden="true">
       <div className="ai-skeleton-header">
         <div className="ai-skeleton-badge" />
         <div className="ai-skeleton-badge short" />
@@ -175,9 +189,7 @@ export function AISkeletonLoader() {
       <div className="ai-skeleton-block" />
       <div className="ai-skeleton-line w60" />
       <div className="ai-skeleton-line w80" />
-      <div className="ai-skeleton-line w45" />
       <div className="ai-skeleton-block short" />
-      <div className="ai-skeleton-line w70" />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import React, { useRef, useState } from "react";
 import { streamClaudeJson } from "../lib/claudeStream.js";
 import { safeJsonParse } from "../lib/partialJson.js";
+import { detectStreamProgress } from "../lib/streamProgress.js";
 import AILoadingAnimation, { AISkeletonLoader } from "../components/AILoadingAnimation.jsx";
 import AIResponseCard from "../components/AIResponseCard.jsx";
 
@@ -36,6 +37,7 @@ export default function ModelThree({ onSaveHistory }) {
   const [refineText, setRefineText] = useState("");
   const [phase, setPhase] = useState("thinking");
   const [phaseLabel, setPhaseLabel] = useState("");
+  const [streamProgress, setStreamProgress] = useState([]);
   const [rawFallback, setRawFallback] = useState("");
   const abortRef = useRef(null);
 
@@ -55,6 +57,7 @@ export default function ModelThree({ onSaveHistory }) {
     setResult(null);
     setPhase("thinking");
     setPhaseLabel("");
+    setStreamProgress([]);
     setRawFallback("");
 
     const context = refine && result ? JSON.stringify(result) : "";
@@ -76,6 +79,7 @@ export default function ModelThree({ onSaveHistory }) {
         },
         onDelta: (t) => {
           collected += t;
+          setStreamProgress(detectStreamProgress(collected, "roadmap"));
         }
       });
 
@@ -149,6 +153,7 @@ export default function ModelThree({ onSaveHistory }) {
             phase={phase}
             phaseLabel={phaseLabel}
             variant="roadmap"
+            streamProgress={streamProgress}
           />
         )}
       </div>

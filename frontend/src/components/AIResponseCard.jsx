@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import MarkdownRenderer from "./MarkdownRenderer.jsx";
+import { formatAiTextForDisplay } from "../lib/formatAiText.js";
 
 /**
  * AIResponseCard — Premium fallback display for AI responses
@@ -18,6 +19,7 @@ import MarkdownRenderer from "./MarkdownRenderer.jsx";
 export default function AIResponseCard({ text, variant = "default" }) {
   const [viewMode, setViewMode] = useState("formatted"); // formatted | source
   const [copied, setCopied] = useState(false);
+  const formattedText = useMemo(() => formatAiTextForDisplay(text || ""), [text]);
 
   if (!text || typeof text !== "string" || !text.trim()) {
     return null;
@@ -64,7 +66,7 @@ export default function AIResponseCard({ text, variant = "default" }) {
           </div>
           <div className="ai-response-meta">
             <span className="ai-response-label">{config.label}</span>
-            <span className="ai-response-sublabel">Powered by local AI</span>
+            <span className="ai-response-sublabel">Readable summary — switch to Source for raw output</span>
           </div>
         </div>
 
@@ -101,7 +103,7 @@ export default function AIResponseCard({ text, variant = "default" }) {
       {/* Body */}
       <div className="ai-response-body">
         {viewMode === "formatted" ? (
-          <MarkdownRenderer text={text} />
+          <MarkdownRenderer text={formattedText} />
         ) : (
           <div className="ai-response-source">
             <pre className="ai-response-source-pre">{text}</pre>

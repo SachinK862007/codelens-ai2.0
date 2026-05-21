@@ -22,7 +22,8 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
 const AI_TEMPERATURE = Number(process.env.AI_TEMPERATURE || 0.2);
 const AI_MAX_TOKENS = Number(process.env.AI_MAX_TOKENS || 1024);
-const OLLAMA_TIMEOUT_MS = 15000; // 15s connection timeout for Ollama
+const OLLAMA_TIMEOUT_MS = 30000; // 30s — local models can be slow on cold start
+const OLLAMA_FETCH_RETRIES = 3;
 
 const writeSse = (res, data) => {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
@@ -92,18 +93,41 @@ const geminiStreamToSse = async ({ system, userText }, res) => {
   writeSse(res, { type: "done" });
 };
 
-const ollamaFetch = (url, options = {}) => {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const ollamaFetchOnce = (url, options = {}) => {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs || OLLAMA_TIMEOUT_MS);
-  return fetch(url, { ...options, signal: controller.signal })
-    .then(res => { clearTimeout(timeout); return res; })
-    .catch(err => {
+  const timeoutMs = options.timeoutMs || OLLAMA_TIMEOUT_MS;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const { timeoutMs: _t, retries: _r, ...fetchOpts } = options;
+  return fetch(url, { ...fetchOpts, signal: controller.signal })
+    .then((res) => {
+      clearTimeout(timeout);
+      return res;
+    })
+    .catch((err) => {
       clearTimeout(timeout);
       if (err.name === "AbortError") {
-        throw new Error(`Ollama is not responding (timed out after ${(options.timeoutMs || OLLAMA_TIMEOUT_MS) / 1000}s). Is Ollama running?`);
+        throw new Error(
+          `Ollama is not responding (timed out after ${timeoutMs / 1000}s). Is Ollama running?`
+        );
       }
       throw new Error(`Cannot connect to Ollama at ${OLLAMA_BASE_URL}. Make sure Ollama is running.`);
     });
+};
+
+const ollamaFetch = async (url, options = {}) => {
+  const retries = options.retries ?? OLLAMA_FETCH_RETRIES;
+  let lastErr;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      return await ollamaFetchOnce(url, options);
+    } catch (e) {
+      lastErr = e;
+      if (attempt < retries - 1) await sleep(800 * (attempt + 1));
+    }
+  }
+  throw lastErr;
 };
 
 const listOllamaModels = async () => {
@@ -164,7 +188,10 @@ const ollamaStreamToSse = async ({ system, userText }, res) => {
   writeSse(res, { type: "meta", model: modelToUse });
 
   // Phase 2: Thinking
-  writeSse(res, { type: "phase", phase: "thinking", label: "AI is thinking..." });
+  writeSse(res, { type: "phase", phase: "thinking", label: "Understanding your request..." });
+
+  // Phase 3: Planning (model prep / prompt structuring)
+  writeSse(res, { type: "phase", phase: "planning", label: "Planning response..." });
 
   let upstream;
   try {
@@ -197,7 +224,7 @@ const ollamaStreamToSse = async ({ system, userText }, res) => {
     return;
   }
 
-  // Phase 3: Writing
+  // Phase 4: Writing
   writeSse(res, { type: "phase", phase: "writing", label: "Generating response..." });
 
   const reader = upstream.body.getReader();

@@ -1,34 +1,57 @@
 /**
  * Stream AI responses from the backend SSE endpoint.
- * Supports phase callbacks, connection timeout, and automatic retry.
- *
+ * Supports phase callbacks, health preflight, connection timeout, and automatic retry.
+ */
+
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
+const STREAM_URL = `${API_BASE}/api/ai/stream`;
+const HEALTH_URL = `${API_BASE}/api/health`;
+const TIMEOUT_MS = 90000; // 90s — cold Ollama models need time for first token
+
+async function checkOllamaHealth() {
+  try {
+    const res = await fetch(HEALTH_URL, { method: "GET", signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return false;
+    const data = await res.json().catch(() => ({}));
+    return data?.ollama?.reachable === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * @param {object} opts
  * @param {string} opts.system   – System prompt
  * @param {string} opts.userText – User message
  * @param {function} opts.onDelta  – Called with each text token
- * @param {function} [opts.onPhase] – Called when the AI phase changes (connecting/thinking/writing/streaming)
+ * @param {function} [opts.onPhase] – Phase changes (connecting/thinking/planning/writing/streaming)
  * @param {AbortSignal} [opts.signal] – Abort signal
- * @param {number} [opts.retries=2] – Number of retries on network failure
+ * @param {number} [opts.retries=2] – Retries on network failure
  */
 export async function streamClaudeJson({ system, userText, onDelta, onPhase, signal, retries = 2 }) {
-  const TIMEOUT_MS = 25000; // 25s connection timeout
   let lastError = null;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
     try {
+      onPhase?.("connecting", "Connecting to local AI...");
+
+      if (attempt === 0) {
+        const healthy = await checkOllamaHealth();
+        if (!healthy) {
+          onPhase?.("connecting", "Waiting for Ollama — starting local model...");
+        }
+      }
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-      // Compose signal: merge user signal and timeout signal
       const mergedSignal = signal
         ? mergeAbortSignals(signal, controller.signal)
         : controller.signal;
 
-      onPhase?.("connecting");
-
-      const res = await fetch("http://localhost:8000/api/ai/stream", {
+      const res = await fetch(STREAM_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ system, userText }),
@@ -81,37 +104,35 @@ export async function streamClaudeJson({ system, userText, onDelta, onPhase, sig
         }
       }
 
-      // If we reach here, stream ended without explicit done
       return;
     } catch (e) {
       lastError = e;
 
-      // Don't retry on user abort
       if (e?.name === "AbortError" && signal?.aborted) {
         throw e;
       }
 
-      // Don't retry on server-reported errors (they won't change)
-      if (e?.message?.includes("AI stream error") || e?.message?.includes("AI stream failed")) {
+      const msg = e?.message || "";
+      if (msg.includes("AI stream error") || msg.includes("AI stream failed")) {
         throw e;
       }
 
-      // Retry on network errors
       if (attempt < retries) {
-        const delay = (attempt + 1) * 1500; // 1.5s, 3s
-        onPhase?.("retrying", `Retrying in ${delay / 1000}s...`);
+        const delay = (attempt + 1) * 2000;
+        onPhase?.("retrying", `Reconnecting in ${delay / 1000}s...`);
         await new Promise((r) => setTimeout(r, delay));
         continue;
       }
     }
   }
 
-  throw lastError || new Error("AI request failed after retries. Is Ollama running?");
+  const hint = lastError?.message?.includes("Ollama")
+    ? lastError.message
+    : "AI request failed after retries. Start Ollama (`ollama serve`) and ensure a model is installed (`ollama pull llama3.1:8b`).";
+
+  throw new Error(hint);
 }
 
-/**
- * Merge two AbortSignals — the resulting signal aborts if either input does.
- */
 function mergeAbortSignals(a, b) {
   const controller = new AbortController();
   const onAbort = () => controller.abort();
