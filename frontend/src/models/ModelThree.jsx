@@ -1,9 +1,10 @@
 import React, { useRef, useState } from "react";
 import { streamClaudeJson } from "../lib/claudeStream.js";
-import { safeJsonParse } from "../lib/partialJson.js";
+import { parseRoadmapResponse } from "../lib/roadmapParse.js";
 import { detectStreamProgress } from "../lib/streamProgress.js";
 import AILoadingAnimation, { AISkeletonLoader } from "../components/AILoadingAnimation.jsx";
 import AIResponseCard from "../components/AIResponseCard.jsx";
+import FileTreeView from "../components/FileTreeView.jsx";
 
 const SYSTEM_PROMPT = `You are CodeLens.ai Project Roadmap Generator.
 
@@ -16,7 +17,7 @@ Respond ONLY valid JSON (no markdown, no extra keys) in this exact shape:
   "recommended_tech_stack": ["..."],
   "recommended_apis": [{ "name": "...", "link": "https://..." , "why": "..." }],
   "research_references": [{ "title": "...", "where_to_find": "..." , "why_relevant": "..." }],
-  "file_folder_structure": "tree as plain text",
+  "file_folder_structure": "multi-line plain text tree using ├── and │ characters, show ALL folders and files",
   "phases": [
     { "name": "Phase 1", "estimated_time": "2-4 days", "tasks": ["..."] }
   ],
@@ -83,7 +84,7 @@ export default function ModelThree({ onSaveHistory }) {
         }
       });
 
-      const parsed = safeJsonParse(collected);
+      const parsed = parseRoadmapResponse(collected);
       if (parsed) {
         setResult(parsed);
         onSaveHistory?.({
@@ -220,18 +221,8 @@ export default function ModelThree({ onSaveHistory }) {
             </div>
 
             <div className="card">
-              <div className="section-label">File/folder structure</div>
-              <pre style={{
-                background: "linear-gradient(135deg, #1b1233, #2c1b46)",
-                color: "#e2d6f6",
-                padding: "14px 16px",
-                borderRadius: "12px",
-                fontSize: "12px",
-                fontFamily: '"Consolas", monospace',
-                whiteSpace: "pre",
-                maxHeight: 320,
-                overflow: "auto"
-              }}>{typeof result.file_folder_structure === 'object' ? JSON.stringify(result.file_folder_structure, null, 2) : result.file_folder_structure}</pre>
+              <div className="section-label">File / folder structure</div>
+              <FileTreeView structure={result.file_folder_structure} />
             </div>
 
             <div className="card">

@@ -268,6 +268,38 @@ const ensureTempDir = async () => {
   return dir;
 };
 
+const sanitizeCode = (code, language) => {
+  let c = String(code || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  // Strip UTF-8 BOM
+  if (c.charCodeAt(0) === 0xfeff) c = c.slice(1);
+  c = c.trim();
+  if (language === "python" && c && !c.endsWith("\n")) {
+    c += "\n";
+  }
+  return c;
+};
+
+const PYTHON_CMDS = process.platform === "win32" ? ["python", "py"] : ["python3", "python"];
+
+const runPythonWithFallback = async (code, input = "", timeoutMs = 15000) => {
+  const dir = await ensureTempDir();
+  const filePath = path.join(dir, "main.py");
+  const clean = sanitizeCode(code, "python");
+  await fs.writeFile(filePath, clean, "utf8");
+
+  let last = null;
+  for (const cmd of PYTHON_CMDS) {
+    // eslint-disable-next-line no-await-in-loop
+    const result = await runProcess(cmd, ["-u", filePath], input, timeoutMs);
+    last = result;
+    if (result.exitCode === 0) return result;
+    const err = (result.stderr || "").toLowerCase();
+    const missing = err.includes("not found") || err.includes("not recognized");
+    if (!missing) return result;
+  }
+  return last || { stdout: "", stderr: "Python not found. Install Python or use the py launcher.", exitCode: 1 };
+};
+
 const runProcess = (command, args, input = "", timeoutMs = 5000) =>
   new Promise((resolve) => {
     const safeEnv = { ...process.env };
@@ -309,19 +341,13 @@ const runProcess = (command, args, input = "", timeoutMs = 5000) =>
     child.stdin.end();
   });
 
-const runPython = async (code, input = "") => {
-  const dir = await ensureTempDir();
-  const filePath = path.join(dir, "main.py");
-  await fs.writeFile(filePath, code, "utf8");
-  const result = await runProcess("python", [filePath], input);
-  return result;
-};
+const runPython = async (code, input = "") => runPythonWithFallback(code, input);
 
 const runC = async (code, input = "") => {
   const dir = await ensureTempDir();
   const filePath = path.join(dir, "main.c");
   const outputPath = path.join(dir, "main.exe");
-  await fs.writeFile(filePath, code, "utf8");
+  await fs.writeFile(filePath, sanitizeCode(code, "c"), "utf8");
   const compile = await runProcess("gcc", [filePath, "-o", outputPath]);
   if (compile.exitCode !== 0) {
     return { ...compile, stdout: "", compileError: true };
@@ -333,7 +359,7 @@ const runCpp = async (code, input = "") => {
   const dir = await ensureTempDir();
   const filePath = path.join(dir, "main.cpp");
   const outputPath = path.join(dir, "main.exe");
-  await fs.writeFile(filePath, code, "utf8");
+  await fs.writeFile(filePath, sanitizeCode(code, "cpp"), "utf8");
   const compile = await runProcess("g++", [filePath, "-o", outputPath]);
   if (compile.exitCode !== 0) {
     return { ...compile, stdout: "", compileError: true };
@@ -509,9 +535,10 @@ const simpleSuggestedCode = (language, intent) => {
 app.post("/api/run", async (req, res) => {
   const { language, code, intent, input } = req.body;
   const result = await runByLanguage(language, code || "", input || "");
-  const success = result.exitCode === 0 && !result.stderr;
+  const success = result.exitCode === 0 && !result.compileError && !result.timedOut;
   res.json({
     success,
+    exitCode: result.exitCode ?? 1,
     stdout: result.stdout.trim(),
     stderr: result.stderr.trim(),
     message: result.stderr ? "Execution failed." : "Execution success.",
@@ -907,28 +934,28 @@ wss.on("connection", (ws) => {
 
         if (language === "python") {
           const filePath = path.join(dir, "main.py");
-          await fs.writeFile(filePath, code, "utf8");
-          cmd = "python";
-          args = ["-u", filePath]; // -u disables stdout buffering
+          const clean = sanitizeCode(code, "python");
+          await fs.writeFile(filePath, clean, "utf8");
+          cmd = process.platform === "win32" ? "python" : "python3";
+          args = ["-u", filePath];
         } else if (language === "c" || language === "cpp") {
           const ext = language === "c" ? ".c" : ".cpp";
           const compiler = language === "c" ? "gcc" : "g++";
           const filePath = path.join(dir, `main${ext}`);
           const outputPath = path.join(dir, "main.exe");
-          await fs.writeFile(filePath, code, "utf8");
+          await fs.writeFile(filePath, sanitizeCode(code, language), "utf8");
 
           ws.send(JSON.stringify({ type: "output", data: `\x1b[90mCompiling...\x1b[0m\r\n` }));
           const safeEnv = { ...process.env };
           delete safeEnv.GEMINI_API_KEY;
           const compile = spawn(compiler, [filePath, "-o", outputPath], { windowsHide: true, env: safeEnv });
 
+          compile.stderr.on("data", (d) => {
+            ws.send(JSON.stringify({ type: "output", data: d.toString().replace(/\n/g, "\r\n") }));
+          });
+
           const compileSucceeded = await new Promise((resolve) => {
-            let errorOccurred = false;
-            compile.stderr.on("data", (d) => {
-              errorOccurred = true;
-              ws.send(JSON.stringify({ type: "output", data: d.toString().replace(/\n/g, "\r\n") }));
-            });
-            compile.on("close", (c) => resolve(c === 0 && !errorOccurred));
+            compile.on("close", (c) => resolve(c === 0));
           });
 
           if (!compileSucceeded) {
@@ -939,10 +966,10 @@ wss.on("connection", (ws) => {
           args = [];
         }
 
-        try {
+        const launchChild = (launchCmd, launchArgs) => {
           const safeEnv = { ...process.env };
           delete safeEnv.GEMINI_API_KEY;
-          child = spawn(cmd, args, { windowsHide: true, env: safeEnv });
+          child = spawn(launchCmd, launchArgs, { windowsHide: true, env: safeEnv });
 
           child.stdout.on("data", (d) => {
             ws.send(JSON.stringify({ type: "output", data: d.toString().replace(/\n/g, "\r\n") }));
@@ -952,10 +979,23 @@ wss.on("connection", (ws) => {
             ws.send(JSON.stringify({ type: "output", data: d.toString().replace(/\n/g, "\r\n") }));
           });
 
+          child.on("error", () => {
+            if (language === "python" && launchCmd === "python" && process.platform === "win32") {
+              launchChild("py", ["-u", path.join(dir, "main.py")]);
+              return;
+            }
+            ws.send(JSON.stringify({ type: "output", data: "\r\nError launching process.\r\n" }));
+            ws.send(JSON.stringify({ type: "exit", code: 1 }));
+          });
+
           child.on("close", (code) => {
             ws.send(JSON.stringify({ type: "exit", code }));
             child = null;
           });
+        };
+
+        try {
+          launchChild(cmd, args);
         } catch (e) {
           ws.send(JSON.stringify({ type: "output", data: `\r\n\x1b[31mError launching process.\x1b[0m` }));
           ws.send(JSON.stringify({ type: "exit", code: 1 }));

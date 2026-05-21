@@ -1,9 +1,4 @@
-<<<<<<< HEAD
 ## Codelens.ai  Web App
-=======
-## CodeLens AI 2.0
->>>>>>> 7188123 (good to go but still need to modefy the ai response)
-
 CodeLens is a local-only, open-source AI-powered developer tool. It supports real-time, token-by-token streaming responses using **Ollama + Llama 3.1 (8B)** running locally on your machine. No paid API keys required.
 
 ### Features

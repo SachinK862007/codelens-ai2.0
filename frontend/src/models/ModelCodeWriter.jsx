@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
 import CodeBlock from "../components/CodeBlock.jsx";
+import SimpleTerminal from "../components/SimpleTerminal.jsx";
 import FlowchartDiagram from "../components/FlowchartDiagram.jsx";
 import { streamClaudeJson } from "../lib/claudeStream.js";
 import { extractJsonString, safeJsonParse } from "../lib/partialJson.js";
@@ -58,6 +59,8 @@ export default function ModelCodeWriter({ onSaveHistory }) {
   const [streamProgress, setStreamProgress] = useState([]);
   const [rawFallback, setRawFallback] = useState("");
   const abortRef = useRef(null);
+  const terminalRef = useRef(null);
+  const [terminalVisible, setTerminalVisible] = useState(true);
 
   const langMeta = useMemo(
     () => LANGUAGES.find((l) => l.id === language) || LANGUAGES[0],
@@ -227,6 +230,32 @@ export default function ModelCodeWriter({ onSaveHistory }) {
             <div className="card">
               <div className="section-label">Flowchart</div>
               <FlowchartDiagram flowchart={data.flowchart} />
+            </div>
+
+            <div className="card terminal-panel">
+              <div className="section-label">Run generated code</div>
+              <p className="panel-subtitle" style={{ marginTop: 0 }}>
+                Interactive terminal — same as Code Runner and Practice.
+              </p>
+              <button
+                className="primary-button"
+                type="button"
+                style={{ marginBottom: 10 }}
+                onClick={() => {
+                  setTerminalVisible(true);
+                  terminalRef.current?.run?.();
+                }}
+                disabled={!data.code}
+              >
+                Run in terminal
+              </button>
+              <SimpleTerminal
+                ref={terminalRef}
+                code={data.code || ""}
+                language={data.language || language}
+                visible={terminalVisible}
+                onVisibilityChange={setTerminalVisible}
+              />
             </div>
           </div>
         ) : rawFallback ? (

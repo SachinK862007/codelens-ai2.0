@@ -1,33 +1,24 @@
 import React, { useRef, useState } from "react";
 import { streamClaudeJson } from "../lib/claudeStream.js";
-import { safeJsonParse } from "../lib/partialJson.js";
+import { parseDebuggerResponse } from "../lib/debuggerParse.js";
 import { detectStreamProgress } from "../lib/streamProgress.js";
-import CodeBlock from "../components/CodeBlock.jsx";
-import LineNumberedCodeBlock from "../components/LineNumberedCodeBlock.jsx";
+import CodeWorkbench from "../components/CodeWorkbench.jsx";
+import DebuggerReport from "../components/DebuggerReport.jsx";
 import AILoadingAnimation, { AISkeletonLoader } from "../components/AILoadingAnimation.jsx";
 import AIResponseCard from "../components/AIResponseCard.jsx";
 
-const renderText = (val, fallback = "") => 
-  typeof val === "object" && val !== null ? JSON.stringify(val) : (val || fallback);
-
 const SYSTEM_PROMPT = `You are CodeLens.ai Smart Error Debugger.
-Respond ONLY in JSON format with keys:
+Respond ONLY with valid JSON (no markdown, no text before or after) using exactly these keys:
 errors[], corrected_code, language, execution_output
 
-errors[] must contain objects:
-{
-  "error_type": "SyntaxError|LogicError|RuntimeError|TypeError|...",
-  "line_number": 14,
-  "wrong_line": "...",
-  "corrected_line": "...",
-  "explanation": "..."
-}
+Each error object must include:
+error_type, line_number, wrong_line, corrected_line, explanation
 
 Rules:
-- Detect the language and set "language".
-- Provide the full corrected code in "corrected_code" (100% error-free).
-- execution_output: expected output when running corrected_code with a reasonable sample input if needed.
-- Never include markdown or backticks. JSON only.`;
+- List EVERY error you find (syntax, logic, runtime) as separate objects in errors[].
+- corrected_code must be the complete fixed program as one string.
+- execution_output must be a single string (use \\n for newlines), NOT an array.
+- Never use backticks. JSON only.`;
 
 export default function ModelTwo({ onSaveHistory, onRunInVisualizer }) {
   const [language, setLanguage] = useState("python");
@@ -88,7 +79,7 @@ ${src}`.trim();
         }
       });
 
-      const parsed = safeJsonParse(collected);
+      const parsed = parseDebuggerResponse(collected, src);
       if (parsed) {
         setResult(parsed);
         onSaveHistory?.({
@@ -97,7 +88,6 @@ ${src}`.trim();
           response: (parsed.corrected_code || "").slice(0, 200)
         });
       } else {
-        // Show formatted output instead of raw text
         setRawFallback(collected);
       }
     } catch (e) {
@@ -117,23 +107,16 @@ ${src}`.trim();
         </div>
         <div className="field-row">
           <label>Language</label>
-          <select value={language} onChange={(e) => setLanguage(e.target.value)}>
+          <select value={language} onChange={(e) => setLanguage(e.target.value)} disabled={loading}>
             <option value="python">Python</option>
             <option value="c">C</option>
             <option value="cpp">C++</option>
           </select>
         </div>
-        <textarea
-          className="code-area"
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          rows={14}
-          placeholder="Paste your code here..."
-          spellCheck={false}
-        />
+        <CodeWorkbench language={language} value={code} onChange={setCode} height={360} />
         <div className="field-row">
           <label>Or upload a file</label>
-          <input type="file" onChange={handleFile} />
+          <input type="file" onChange={handleFile} disabled={loading} />
         </div>
         <button className="primary-button" onClick={diagnose} disabled={loading}>
           {loading ? "Analyzing..." : "Analyze & Fix"}
@@ -163,70 +146,11 @@ ${src}`.trim();
         {loading ? (
           <AISkeletonLoader />
         ) : result ? (
-          <div className="writer-output ai-result-enter">
-            <div className="writer-badges">
-              <span className="badge">{result.language || language}</span>
-              <span className="badge">Errors: {Array.isArray(result.errors) ? result.errors.length : 0}</span>
-            </div>
-
-            <div className="card">
-              <div className="section-label">Errors</div>
-              {Array.isArray(result.errors) && result.errors.length ? (
-                <div className="steps-list" style={{ paddingLeft: 0 }}>
-                  {result.errors.map((e, i) => (
-                    <div className="card" key={`${i}-${e.line_number}`} style={{ marginTop: 10 }}>
-                      <div className="writer-badges">
-                        <span className="badge mono">{renderText(e.error_type, "Error")}</span>
-                        <span className="badge">Line {renderText(e.line_number, "Unknown")}</span>
-                      </div>
-                      <div className="diff-row" style={{ marginTop: 10 }}>
-                        <div className="diff-cell bad">
-                          <div className="section-label">Wrong line</div>
-                          <pre className="badline-pre" style={{ color: "#7a1f1f", background: "transparent", border: "none", overflowX: "auto" }}>
-                            {renderText(e.wrong_line)}
-                          </pre>
-                        </div>
-                        <div className="diff-cell good">
-                          <div className="section-label">Corrected line</div>
-                          <pre className="badline-pre" style={{ color: "#1f6f45", background: "transparent", border: "none", overflowX: "auto" }}>
-                            {renderText(e.corrected_line)}
-                          </pre>
-                        </div>
-                      </div>
-                      <div className="section-label">Explanation</div>
-                      <p className="para">{renderText(e.explanation)}</p>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="empty-state">No errors reported.</div>
-              )}
-            </div>
-
-            <div className="card">
-              <div className="section-label">Full Corrected Code</div>
-              <LineNumberedCodeBlock
-                title="Full Corrected Code"
-                languageLabel={result.language || language}
-                code={result.corrected_code || ""}
-              />
-              <div className="button-row" style={{ marginTop: 10 }}>
-                <button
-                  className="primary-button"
-                  type="button"
-                  onClick={() => onRunInVisualizer?.({ language: result.language || language, code: result.corrected_code || "" })}
-                  disabled={!result.corrected_code}
-                >
-                  Run this code
-                </button>
-              </div>
-            </div>
-
-            <div className="card">
-              <div className="section-label">Execution Preview</div>
-              <CodeBlock title="Expected output" language="text" code={result.execution_output || ""} />
-            </div>
-          </div>
+          <DebuggerReport
+            result={result}
+            language={language}
+            onRunInVisualizer={onRunInVisualizer}
+          />
         ) : rawFallback ? (
           <AIResponseCard text={rawFallback} variant="debugger" />
         ) : (

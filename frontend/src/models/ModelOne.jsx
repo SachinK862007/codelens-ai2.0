@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useEffect, useRef } from "react";
 import mermaid from "mermaid";
 import SimpleTerminal from "../components/SimpleTerminal.jsx";
+import CodeWorkbench from "../components/CodeWorkbench.jsx";
 
 const DEFAULT_CODE = `# Write your code here
 name = input("Enter your name: ")
@@ -412,13 +413,7 @@ export default function ModelOne({ onSaveHistory, runnerPrefill }) {
             <option value="cpp">C++</option>
           </select>
         </div>
-        <textarea
-          className="code-area"
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          rows={14}
-          spellCheck={false}
-        />
+        <CodeWorkbench language={language} value={code} onChange={setCode} height={320} />
         <div className="field-row">
           <label>What do you want the program to do if it fails?</label>
           <input
@@ -438,7 +433,7 @@ export default function ModelOne({ onSaveHistory, runnerPrefill }) {
         <div className="panel-subtitle">
           Type directly into the console to interact with your program!
         </div>
-        <div className="output-card terminal-card" style={{ padding: '8px', minHeight: '340px' }}>
+        <div className="terminal-panel">
           <SimpleTerminal
             ref={simpleTerminalRef}
             code={code}

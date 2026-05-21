@@ -1,14 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
-
-async function runCode(language, code, input = "") {
-  const res = await fetch(`${API_BASE}/api/run`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ language, code, input: input || "" })
-  });
-  if (!res.ok) return null;
-  return res.json();
-}
+import { runCodeOnServer } from "./codeRun.js";
 
 function normalizeOutput(stdout) {
   return (stdout || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -28,7 +18,7 @@ export async function tryLocalPracticeGrade(language, code, question) {
   try {
     // Hello / greeting (py-1, c-1, js-1, ...)
     if (/-1$/.test(id)) {
-      const data = await runCode(language, code, "");
+      const data = await runCodeOnServer(language, code, "");
       if (!data) return null;
 
       const out = (data.stdout || "").trim();
@@ -64,7 +54,7 @@ export async function tryLocalPracticeGrade(language, code, question) {
 
     // Sum two integers (py-2, c-2, js-2, ...)
     if (/-2$/.test(id) && ["python", "javascript", "typescript"].includes(language)) {
-      const data = await runCode(language, code, "3\n4\n");
+      const data = await runCodeOnServer(language, code, "3\n4\n");
       if (!data) return null;
 
       const out = normalizeOutput(data.stdout);

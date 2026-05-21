@@ -176,11 +176,16 @@ function cleanLlmOutput(raw) {
  * prose before/after, unescaped newlines in strings, or other non-JSON text.
  * Returns the parsed object or null.
  */
+function repairLlmEscapeArtifacts(text) {
+  if (!text || typeof text !== "string") return text;
+  return text.replace(/\\\\"/g, '\\"').replace(/\\\\n/g, "\\n").replace(/\\\\t/g, "\\t");
+}
+
 export function extractJsonFromText(raw) {
   if (!raw || typeof raw !== "string") return null;
 
   const cleaned = cleanLlmOutput(raw);
-  const syntaxRepaired = repairJsonSyntax(cleaned);
+  const syntaxRepaired = repairLlmEscapeArtifacts(repairJsonSyntax(cleaned));
 
   // 1. Try direct parse first
   try {

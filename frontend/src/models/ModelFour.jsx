@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import Editor from "@monaco-editor/react";
+import CodeWorkbench from "../components/CodeWorkbench.jsx";
 import { streamClaudeJson } from "../lib/claudeStream.js";
 import { PRACTICE_LANGUAGES, PRACTICE_QUESTIONS } from "../data/practiceQuestions.js";
 import { detectStreamProgress } from "../lib/streamProgress.js";
@@ -211,22 +211,13 @@ ${src}`;
           <div className="empty-state">No questions loaded for this language.</div>
         )}
 
-        <div className={`practice-editor ${passedFlash ? "passed" : ""}`}>
-          <Editor
-            height="360px"
-            language={language === "cpp" ? "cpp" : language}
-            value={code}
-            onChange={(v) => setCode(v || "")}
-            theme="vs-dark"
-            options={{
-              minimap: { enabled: false },
-              fontSize: 13,
-              wordWrap: "on",
-              automaticLayout: true,
-              scrollBeyondLastLine: false
-            }}
-          />
-        </div>
+        <CodeWorkbench
+          language={language}
+          value={code}
+          onChange={setCode}
+          height={360}
+          className={passedFlash ? "passed" : ""}
+        />
 
         <button className="primary-button" type="button" onClick={runCheck} disabled={loading || !question}>
           {loading ? "Checking..." : "Run & Check"}
