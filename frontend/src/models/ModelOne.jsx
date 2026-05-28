@@ -1,8 +1,7 @@
-import React, { useMemo, useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import mermaid from "mermaid";
 import SimpleTerminal from "../components/SimpleTerminal.jsx";
 import CodeWorkbench from "../components/CodeWorkbench.jsx";
-import TraceVisualizer from "../components/TraceVisualizer.jsx";
 
 const DEFAULT_CODE = `# Write your code here
 name = input("Enter your name: ")
@@ -15,19 +14,15 @@ export default function ModelOne({ onSaveHistory, runnerPrefill }) {
   const [loading, setLoading] = useState(false);
   const [terminalVisible, setTerminalVisible] = useState(true);
   const [result, setResult] = useState(null);
-  const flowchartRef = useRef(null);
   const [algoOpen, setAlgoOpen] = useState(false);
+  const flowchartRef = useRef(null);
   const simpleTerminalRef = useRef(null);
-
-  const codeLines = useMemo(() => code.split("\n"), [code]);
 
   useEffect(() => {
     if (!runnerPrefill?.code) return;
     if (typeof runnerPrefill.language === "string") setLanguage(runnerPrefill.language);
     setCode(runnerPrefill.code);
-  }, [runnerPrefill?.ts]); // re-run on new prefill
-
-
+  }, [runnerPrefill?.ts]);
 
   useEffect(() => {
     mermaid.initialize({ startOnLoad: false, theme: "default" });
@@ -42,14 +37,12 @@ export default function ModelOne({ onSaveHistory, runnerPrefill }) {
         flowchartRef.current.innerHTML = svg;
       })
       .catch(() => {
-        flowchartRef.current.innerHTML =
-          "<div>Unable to render flowchart.</div>";
+        flowchartRef.current.innerHTML = "<div>Unable to render flowchart.</div>";
       });
   }, [result]);
 
   const fetchAnalysis = async () => {
     try {
-      // Re-use logic to just fetch the flowchart mapping behind the scenes
       const response = await fetch("http://localhost:8000/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -65,11 +58,7 @@ export default function ModelOne({ onSaveHistory, runnerPrefill }) {
   const runCode = async () => {
     setLoading(true);
     setTerminalVisible(true);
-
-    if (simpleTerminalRef.current) {
-      simpleTerminalRef.current.run();
-    }
-    
+    simpleTerminalRef.current?.run();
     await fetchAnalysis();
     setLoading(false);
   };
@@ -89,9 +78,9 @@ export default function ModelOne({ onSaveHistory, runnerPrefill }) {
             <option value="cpp">C++</option>
           </select>
         </div>
-        <CodeWorkbench language={language} value={code} onChange={setCode} height={500} />
-        <div className="field-row">
-          <label>What do you want the program to do if it fails?</label>
+        <CodeWorkbench language={language} value={code} onChange={setCode} height={560} />
+        <div className="field-row" style={{ marginTop: 10 }}>
+          <label>Intent (optional — describe what the program should do)</label>
           <input
             placeholder="Describe the intended program..."
             value={intent}
@@ -99,7 +88,7 @@ export default function ModelOne({ onSaveHistory, runnerPrefill }) {
             spellCheck={false}
           />
         </div>
-        <button className="primary-button" onClick={runCode} disabled={loading}>
+        <button className="primary-button" onClick={runCode} disabled={loading} style={{ marginTop: 8 }}>
           {loading ? "Process Running..." : "Run in Terminal"}
         </button>
       </div>
@@ -107,9 +96,9 @@ export default function ModelOne({ onSaveHistory, runnerPrefill }) {
       <div className="panel">
         <div className="panel-title">Interactive Terminal</div>
         <div className="panel-subtitle">
-          Type directly into the console to interact with your program!
+          Type directly into the console to interact with your program.
         </div>
-        <div className="terminal-panel">
+        <div className="terminal-panel" style={{ flex: 1 }}>
           <SimpleTerminal
             ref={simpleTerminalRef}
             code={code}
@@ -135,19 +124,11 @@ export default function ModelOne({ onSaveHistory, runnerPrefill }) {
         </button>
       </div>
 
-      <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
-        <TraceVisualizer language={language} code={code} input="" />
-      </div>
-
       <div className={`modal-backdrop ${algoOpen ? "show" : ""}`}>
         <div className="modal-card glass-card">
           <div className="modal-header">
             <div className="modal-title">Algorithm & Flowchart</div>
-            <button
-              className="ghost-button"
-              onClick={() => setAlgoOpen(false)}
-              type="button"
-            >
+            <button className="ghost-button" onClick={() => setAlgoOpen(false)} type="button">
               Close
             </button>
           </div>
@@ -172,15 +153,11 @@ export default function ModelOne({ onSaveHistory, runnerPrefill }) {
                 )}
               </div>
             ) : (
-              <div className="empty-state">
-                Run your code to see algorithm info.
-              </div>
+              <div className="empty-state">Run your code to see algorithm info.</div>
             )}
           </div>
         </div>
       </div>
-
-      {/* Removed static video modal */}
     </div>
   );
 }

@@ -3,6 +3,15 @@ import LineNumberedCodeBlock from "./LineNumberedCodeBlock.jsx";
 import SimpleTerminal from "./SimpleTerminal.jsx";
 import { runCodeOnServer } from "../lib/codeRun.js";
 
+/** Returns true if the code requires interactive stdin input */
+function requiresInput(code, lang) {
+  if (!code) return false;
+  if (lang === "python") return /\binput\s*\(/.test(code);
+  if (lang === "c") return /\bscanf\s*\(|\bfgets\s*\(|\bgetchar\s*\(/.test(code);
+  if (lang === "cpp") return /\bcin\s*>>|\bgetline\s*\(/.test(code);
+  return false;
+}
+
 export default function DebuggerReport({ result, language, onRunInVisualizer }) {
   const terminalRef = useRef(null);
   const [terminalVisible, setTerminalVisible] = useState(true);
@@ -13,9 +22,11 @@ export default function DebuggerReport({ result, language, onRunInVisualizer }) 
   const errors = Array.isArray(result?.errors) ? result.errors : [];
   const runLang = result?.language || language;
   const runnableCode = result?.corrected_code || "";
+  const isInteractive = requiresInput(runnableCode, runLang);
 
   useEffect(() => {
-    if (!runnableCode.trim()) {
+    // Skip auto-verification for interactive programs — they need stdin
+    if (!runnableCode.trim() || isInteractive) {
       setVerified(null);
       return;
     }
@@ -33,16 +44,13 @@ export default function DebuggerReport({ result, language, onRunInVisualizer }) 
           exitCode: data.exitCode
         });
         if (data.stdout) setVerifiedOutput(data.stdout);
-        else if (data.stderr) setVerifiedOutput("");
       })
       .finally(() => {
         if (!cancelled) setVerifying(false);
       });
 
-    return () => {
-      cancelled = true;
-    };
-  }, [runnableCode, runLang]);
+    return () => { cancelled = true; };
+  }, [runnableCode, runLang, isInteractive]);
 
   const runCorrected = () => {
     setTerminalVisible(true);
@@ -134,15 +142,16 @@ export default function DebuggerReport({ result, language, onRunInVisualizer }) 
         <div className="section-label">
           {verifying ? "Verifying output…" : verified?.success ? "Verified output (from running your code)" : "Program output"}
         </div>
-        {verified?.stderr && !verified.success ? (
+        {isInteractive ? (
+          <div className="empty-state">This program needs user input — use the live terminal below to run it interactively.</div>
+        ) : verified?.stderr && !verified.success ? (
           <pre className="debugger-run-error">{verified.stderr}</pre>
-        ) : null}
-        {displayOutput ? (
+        ) : displayOutput ? (
           <pre className="debugger-expected-output">{displayOutput}</pre>
         ) : (
           <div className="empty-state">Run corrected code to see output.</div>
         )}
-        {aiEstimate && verified?.stdout && aiEstimate.trim() !== verified.stdout.trim() ? (
+        {!isInteractive && aiEstimate && verified?.stdout && aiEstimate.trim() !== verified.stdout.trim() ? (
           <details className="debugger-ai-estimate">
             <summary>AI estimate (may differ from actual run)</summary>
             <pre className="debugger-expected-output muted">{aiEstimate}</pre>

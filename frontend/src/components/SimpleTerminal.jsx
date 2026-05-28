@@ -12,7 +12,7 @@ const SimpleTerminal = forwardRef(function SimpleTerminal(
   { code, language, visible, onVisibilityChange, autoScroll = true, initialStdin = "" },
   ref
 ) {
-  const [lines, setLines] = useState([]);
+  const [output, setOutput] = useState("");
   const [inputValue, setInputValue] = useState("");
   const [status, setStatus] = useState("idle");
   const [exitCode, setExitCode] = useState(null);
@@ -31,7 +31,7 @@ const SimpleTerminal = forwardRef(function SimpleTerminal(
     if (autoScroll && outputRef.current) {
       outputRef.current.scrollTop = outputRef.current.scrollHeight;
     }
-  }, [lines, autoScroll]);
+  }, [output, autoScroll]);
 
   useEffect(() => {
     if (status === "running") inputRef.current?.focus();
@@ -39,12 +39,10 @@ const SimpleTerminal = forwardRef(function SimpleTerminal(
 
   useEffect(() => () => wsRef.current?.close(), []);
 
-  const appendLine = (text, type = "output") => {
-    setLines((prev) => [...prev, { text, type }]);
-  };
+  const appendText = (text) => setOutput((prev) => prev + text);
 
   const connectAndRun = () => {
-    setLines([]);
+    setOutput("");
     setInputValue("");
     setExitCode(null);
     updateStatus("running");
@@ -63,9 +61,8 @@ const SimpleTerminal = forwardRef(function SimpleTerminal(
       if (initialStdin && initialStdin.trim()) {
         setTimeout(() => {
           if (ws.readyState === WebSocket.OPEN) {
-            const val = initialStdin.trim() + "\n";
-            ws.send(JSON.stringify({ type: "input", input: val }));
-            appendLine(`> [Sample Input Provided]`, "stdin");
+            ws.send(JSON.stringify({ type: "input", input: initialStdin.trim() + "\n" }));
+            appendText(`> [Sample Input Provided]\n`);
           }
         }, 300);
       }
@@ -76,26 +73,21 @@ const SimpleTerminal = forwardRef(function SimpleTerminal(
         const msg = JSON.parse(event.data);
         if (msg.type === "output") {
           const clean = (msg.data || "")
-            .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "")
+            .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "") // strip ANSI
             .replace(/\r\n/g, "\n")
             .replace(/\r/g, "\n");
-          if (clean) appendLine(clean, "output");
+          appendText(clean);
         } else if (msg.type === "exit") {
           const codeNum = msg.code ?? 0;
           setExitCode(codeNum);
           updateStatus("exited");
-          appendLine(`\n[Process exited with code ${codeNum}]`, codeNum === 0 ? "success" : "error");
+          appendText(`\n[Process exited with code ${codeNum}]\n`);
         }
-      } catch {
-        /* ignore */
-      }
+      } catch { /* ignore */ }
     };
 
     ws.onerror = () => {
-      appendLine(
-        "Cannot connect to backend on port 8000.\nStart it with: cd backend && npm run dev",
-        "error"
-      );
+      appendText("Cannot connect to backend on port 8000.\nStart it with: cd backend && npm run dev\n");
       updateStatus("exited");
       setExitCode(1);
     };
@@ -118,7 +110,7 @@ const SimpleTerminal = forwardRef(function SimpleTerminal(
     const val = inputValue.trim();
     if (!val || wsRef.current?.readyState !== WebSocket.OPEN) return;
     wsRef.current.send(JSON.stringify({ type: "input", input: `${val}\n` }));
-    appendLine(`> ${val}`, "stdin");
+    appendText(`> ${val}\n`);
     setInputValue("");
   };
 
@@ -161,14 +153,11 @@ const SimpleTerminal = forwardRef(function SimpleTerminal(
       </div>
 
       <div ref={outputRef} className="codelens-terminal-output">
-        {lines.length === 0 && (
+        {output ? (
+          <pre className="codelens-terminal-pre">{output}</pre>
+        ) : (
           <span className="codelens-terminal-placeholder">Output will appear here…</span>
         )}
-        {lines.map((line, i) => (
-          <span key={i} className={`codelens-terminal-line ${line.type}`}>
-            {line.text}
-          </span>
-        ))}
       </div>
 
       <div className="codelens-terminal-inputrow">

@@ -6,6 +6,24 @@ export function repairLlmEscapeArtifacts(text) {
   return text.replace(/\\\\"/g, '\\"').replace(/\\\\n/g, "\\n").replace(/\\\\t/g, "\\t");
 }
 
+/** Escape literal newlines/tabs inside JSON strings (LLMs often emit these) */
+function repairJsonNewlines(text) {
+  let result = "";
+  let inString = false;
+  let escape = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (escape) { result += ch; escape = false; continue; }
+    if (ch === "\\") { result += ch; escape = true; continue; }
+    if (ch === '"') { inString = !inString; result += ch; continue; }
+    if (inString && ch === "\n") { result += "\\n"; continue; }
+    if (inString && ch === "\r") { continue; }
+    if (inString && ch === "\t") { result += "\\t"; continue; }
+    result += ch;
+  }
+  return result;
+}
+
 function normalizeError(entry, index) {
   if (!entry || typeof entry !== "object") {
     return {
@@ -109,7 +127,11 @@ export function normalizeDebuggerResult(raw) {
 export function parseDebuggerResponse(collected, sourceCode = "") {
   if (!collected || typeof collected !== "string") return null;
 
-  const repaired = repairLlmEscapeArtifacts(collected);
+  // Step 1: repair literal newlines/tabs inside strings first
+  const newlineFixed = repairJsonNewlines(collected);
+  // Step 2: fix double-escape artifacts
+  const repaired = repairLlmEscapeArtifacts(newlineFixed);
+
   let obj = extractJsonFromText(repaired);
   if (!obj) obj = extractJsonFromText(collected);
 
@@ -118,7 +140,7 @@ export function parseDebuggerResponse(collected, sourceCode = "") {
     const end = repaired.lastIndexOf("}");
     if (start !== -1 && end > start) {
       try {
-        obj = JSON.parse(repairLlmEscapeArtifacts(repaired.slice(start, end + 1)));
+        obj = JSON.parse(repaired.slice(start, end + 1));
       } catch {
         return null;
       }

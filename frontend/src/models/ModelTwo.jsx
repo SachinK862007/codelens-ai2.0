@@ -8,18 +8,33 @@ import AILoadingAnimation, { AISkeletonLoader } from "../components/AILoadingAni
 import AIResponseCard from "../components/AIResponseCard.jsx";
 
 const SYSTEM_PROMPT = `You are CodeLens.ai Smart Error Debugger.
-Respond ONLY with valid JSON (no markdown, no text before or after) using exactly these keys:
-errors[], corrected_code, language, execution_output
+Respond ONLY with a single valid JSON object. No markdown, no text before or after, no code fences.
 
-Each error object must include:
-error_type, line_number, wrong_line, corrected_line, explanation
+Exact shape required:
+{
+  "errors": [
+    {
+      "error_type": "SyntaxError",
+      "line_number": 5,
+      "wrong_line": "the exact bad line",
+      "corrected_line": "the fixed line",
+      "explanation": "one sentence why"
+    }
+  ],
+  "corrected_code": "full fixed program as one string with \\n for newlines",
+  "language": "python",
+  "execution_output": "sample output string with \\n for newlines"
+}
 
 Rules:
-- The user may provide raw source code OR an error stack trace pasted from a terminal. If it's a stack trace, deduce the original code and the fixes required.
-- List EVERY error you find (syntax, logic, runtime) as separate objects in errors[].
-- corrected_code must be the complete fixed program as one string, stripped of any terminal error trace text.
-- execution_output must be a single string (use \\n for newlines), NOT an array.
-- Never use backticks. JSON only.`;
+- You MUST find and list EVERY single error in the code — syntax, logic, runtime, and semantic. Do NOT stop after finding one or two. Scan the ENTIRE program.
+- Each error gets its own separate object in the errors array. Never merge multiple errors into one.
+- corrected_code must be the COMPLETE fixed program — never truncate it.
+- All newlines inside string values MUST be escaped as \\n. Never use literal newlines inside JSON strings.
+- All double quotes inside string values MUST be escaped as \\".
+- execution_output must be a plain string, NOT an array or object.
+- Never use backticks anywhere in the JSON.
+- If the input is a terminal stack trace, deduce the original code and all fixes from it.`;
 
 export default function ModelTwo({ onSaveHistory, onRunInVisualizer }) {
   const [language, setLanguage] = useState("python");

@@ -1,12 +1,10 @@
 import React, { useMemo, useRef, useState } from "react";
 import CodeBlock from "../components/CodeBlock.jsx";
 import SimpleTerminal from "../components/SimpleTerminal.jsx";
-import FlowchartDiagram from "../components/FlowchartDiagram.jsx";
 import { streamClaudeJson } from "../lib/claudeStream.js";
-import { extractJsonString, safeJsonParse } from "../lib/partialJson.js";
+import { extractJsonString, safeJsonParse, extractCodeWriterFields } from "../lib/partialJson.js";
 import { detectStreamProgress } from "../lib/streamProgress.js";
 import AILoadingAnimation, { AISkeletonLoader } from "../components/AILoadingAnimation.jsx";
-import AIResponseCard from "../components/AIResponseCard.jsx";
 
 const LANGUAGES = [
   { id: "c", label: "C", icon: "C" },
@@ -24,29 +22,57 @@ const LANGUAGES = [
   { id: "kotlin", label: "Kotlin", icon: "K" }
 ];
 
-const SYSTEM_PROMPT = `You are CodeLens.ai Code Writer, an expert AI programming assistant capable of solving complex algorithmic and software architecture tasks flawlessly.
+const SYSTEM_PROMPT = `You are CodeLens.ai Code Writer. Return ONLY a single valid JSON object. No markdown, no prose, no code fences.
 
-Return ONLY valid JSON (no markdown, no extra keys, no prose outside JSON) in exactly this shape:
+CRITICAL JSON ESCAPING RULES — you MUST follow these or the output will be rejected:
+1. Every newline inside a string value → write as \\n (backslash + n)
+2. Every double quote inside a string value → write as \\" (backslash + quote)
+3. Every backslash inside a string value → write as \\\\ (two backslashes)
+4. NEVER put a literal newline character inside a JSON string value
+5. NEVER put a literal unescaped " inside a JSON string value
+
+Required shape:
 {
-  "code": "...",
-  "language": "...",
-  "algorithm": ["step1", "step2"],
-  "logic_explanation": "...",
+  "code": "full runnable code with \\n for newlines and \\" for quotes",
+  "language": "python",
+  "algorithm": ["step 1", "step 2"],
+  "logic_explanation": "one paragraph explanation",
   "flowchart": [
-    { "id": "1", "label": "Start", "type": "start", "next": "2" }
+    { "id": "1", "label": "Start", "type": "start", "next": "2" },
+    { "id": "2", "label": "Process", "type": "process", "next": "3" },
+    { "id": "3", "label": "End", "type": "end" }
   ],
-  "time_complexity": "...",
-  "space_complexity": "..."
+  "time_complexity": "O(n)",
+  "space_complexity": "O(1)"
 }
 
-Rules:
+Additional rules:
 - "language" must match the requested language exactly.
-- "algorithm" must be a list of clear, numbered-meaning steps (strings) in correct order.
-- "flowchart" must be a single connected chain via "next" (linear), starting at id "1".
-- Use type: start | process | condition | end.
-- Keep "code" complete and runnable.
-- WARNING: You MUST correctly escape all newlines (\\n) and double quotes (\\") inside the code string value. Do NOT output unescaped newlines or quotes inside JSON strings.
-- Never include backticks (\`\`) in code fences.`;
+- "flowchart" must be a linear chain via "next", starting at id "1", type: start|process|condition|end.
+- "code" must be complete and runnable.
+- Never include backticks anywhere.`;
+
+function RawFallback({ text }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(text); } catch { /* ignore */ }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <div className="card">
+      <div className="section-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span>Raw Output</span>
+        <button className="ghost-button" type="button" onClick={copy} style={{ fontSize: 12, padding: "2px 10px" }}>
+          {copied ? "✓ Copied" : "Copy"}
+        </button>
+      </div>
+      <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, margin: 0, maxHeight: 480, overflowY: "auto" }}>
+        {text}
+      </pre>
+    </div>
+  );
+}
 
 export default function ModelCodeWriter({ onSaveHistory }) {
   const [language, setLanguage] = useState("python");
@@ -110,7 +136,7 @@ export default function ModelCodeWriter({ onSaveHistory }) {
         }
       });
 
-      const finalParsed = safeJsonParse(collected);
+      const finalParsed = safeJsonParse(collected) || extractCodeWriterFields(collected);
       if (finalParsed) {
         setData(finalParsed);
         onSaveHistory?.({
@@ -242,11 +268,6 @@ export default function ModelCodeWriter({ onSaveHistory }) {
               <p className="para">{data.logic_explanation || liveLogic || "Logic explanation appears here."}</p>
             </div>
 
-            <div className="card">
-              <div className="section-label">Flowchart</div>
-              <FlowchartDiagram flowchart={data.flowchart} />
-            </div>
-
             <div className="card terminal-panel">
               <div className="section-label">Run generated code</div>
               <p className="panel-subtitle" style={{ marginTop: 0 }}>
@@ -275,7 +296,7 @@ export default function ModelCodeWriter({ onSaveHistory }) {
             </div>
           </div>
         ) : rawFallback ? (
-          <AIResponseCard text={rawFallback} variant="codewriter" />
+          <RawFallback text={rawFallback} />
         ) : (
           <div className="empty-state">Generate code to see structured output.</div>
         )}

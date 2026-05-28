@@ -190,7 +190,9 @@ function repairLlmEscapeArtifacts(text) {
 export function extractJsonFromText(raw) {
   if (!raw || typeof raw !== "string") return null;
 
-  const cleaned = cleanLlmOutput(raw);
+  // Always repair unescaped newlines/tabs first — LLMs frequently emit these
+  const newlineRepaired = repairJsonNewlines(raw);
+  const cleaned = cleanLlmOutput(newlineRepaired);
   const syntaxRepaired = repairLlmEscapeArtifacts(repairJsonSyntax(cleaned));
 
   // 1. Try direct parse first
@@ -272,4 +274,97 @@ export function extractJsonFromText(raw) {
  */
 export function safeJsonParse(text) {
   return extractJsonFromText(text);
+}
+
+/**
+ * Last-resort extractor for Code Writer responses where the "code" field
+ * contains unescaped double quotes that break standard JSON.parse.
+ * Extracts each known field individually using extractJsonString,
+ * then reconstructs a safe object.
+ */
+export function extractCodeWriterFields(raw) {
+  if (!raw || typeof raw !== "string") return null;
+
+  const code = extractJsonString(raw, "code");
+  const language = extractJsonString(raw, "language");
+  const logic = extractJsonString(raw, "logic_explanation");
+  const time_complexity = extractJsonString(raw, "time_complexity");
+  const space_complexity = extractJsonString(raw, "space_complexity");
+
+  // Must have at least code to be useful
+  if (!code) return null;
+
+  // Extract algorithm array
+  let algorithm = [];
+  try {
+    const algStart = raw.indexOf('"algorithm"');
+    if (algStart !== -1) {
+      const arrStart = raw.indexOf("[", algStart);
+      if (arrStart !== -1) {
+        // Find matching ]
+        let depth = 0;
+        let inStr = false;
+        let esc = false;
+        let arrEnd = -1;
+        for (let i = arrStart; i < raw.length; i++) {
+          const ch = raw[i];
+          if (esc) { esc = false; continue; }
+          if (ch === "\\") { esc = true; continue; }
+          if (ch === '"') { inStr = !inStr; continue; }
+          if (inStr) continue;
+          if (ch === "[") depth++;
+          if (ch === "]") { depth--; if (depth === 0) { arrEnd = i; break; } }
+        }
+        if (arrEnd !== -1) {
+          const arrText = raw.slice(arrStart, arrEnd + 1);
+          try {
+            algorithm = JSON.parse(repairJsonNewlines(arrText));
+          } catch {
+            // fallback: extract strings manually
+            const matches = arrText.match(/"((?:[^"\\]|\\.)*)"/g);
+            if (matches) algorithm = matches.map(s => s.slice(1, -1).replace(/\\n/g, "\n").replace(/\\"/g, '"'));
+          }
+        }
+      }
+    }
+  } catch { /* ignore */ }
+
+  // Extract flowchart array
+  let flowchart = [];
+  try {
+    const fcStart = raw.indexOf('"flowchart"');
+    if (fcStart !== -1) {
+      const arrStart = raw.indexOf("[", fcStart);
+      if (arrStart !== -1) {
+        let depth = 0;
+        let inStr = false;
+        let esc = false;
+        let arrEnd = -1;
+        for (let i = arrStart; i < raw.length; i++) {
+          const ch = raw[i];
+          if (esc) { esc = false; continue; }
+          if (ch === "\\") { esc = true; continue; }
+          if (ch === '"') { inStr = !inStr; continue; }
+          if (inStr) continue;
+          if (ch === "[") depth++;
+          if (ch === "]") { depth--; if (depth === 0) { arrEnd = i; break; } }
+        }
+        if (arrEnd !== -1) {
+          try {
+            flowchart = JSON.parse(repairJsonNewlines(raw.slice(arrStart, arrEnd + 1)));
+          } catch { /* ignore */ }
+        }
+      }
+    }
+  } catch { /* ignore */ }
+
+  return {
+    code,
+    language: language || "python",
+    algorithm: Array.isArray(algorithm) ? algorithm : [],
+    logic_explanation: logic || "",
+    flowchart: Array.isArray(flowchart) ? flowchart : [],
+    time_complexity: time_complexity || "",
+    space_complexity: space_complexity || ""
+  };
 }

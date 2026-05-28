@@ -1508,6 +1508,18 @@ input {
 
 .codelens-terminal-line {
   display: block;
+  min-height: 1.6em;
+}
+
+.codelens-terminal-pre {
+  margin: 0;
+  padding: 0;
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #e8dff8;
 }
 
 .codelens-terminal-line.error { color: #f5a0a0; }
