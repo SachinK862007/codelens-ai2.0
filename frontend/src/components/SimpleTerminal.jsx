@@ -9,7 +9,7 @@ import React, {
 const WS_URL = "ws://localhost:8000";
 
 const SimpleTerminal = forwardRef(function SimpleTerminal(
-  { code, language, visible, onVisibilityChange, autoScroll = true },
+  { code, language, visible, onVisibilityChange, autoScroll = true, initialStdin = "" },
   ref
 ) {
   const [lines, setLines] = useState([]);
@@ -60,6 +60,15 @@ const SimpleTerminal = forwardRef(function SimpleTerminal(
 
     ws.onopen = () => {
       ws.send(JSON.stringify({ type: "init", language, code }));
+      if (initialStdin && initialStdin.trim()) {
+        setTimeout(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            const val = initialStdin.trim() + "\n";
+            ws.send(JSON.stringify({ type: "input", input: val }));
+            appendLine(`> [Sample Input Provided]`, "stdin");
+          }
+        }, 300);
+      }
     };
 
     ws.onmessage = (event) => {

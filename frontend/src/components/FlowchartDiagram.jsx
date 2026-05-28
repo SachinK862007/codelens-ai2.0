@@ -38,45 +38,54 @@ function wrapText(text, maxCharsPerLine) {
 
 export default function FlowchartDiagram({ flowchart }) {
   const model = useMemo(() => {
-    const nodes = Array.isArray(flowchart) ? flowchart : [];
-    const byId = new Map(nodes.map((n) => [String(n.id), n]));
+    try {
+      const nodes = Array.isArray(flowchart) ? flowchart : [];
+      const byId = new Map(nodes.map((n) => [String(n.id || Math.random()), n]));
 
-    // Lay out nodes top-down following "next" pointers from the first node.
-    const ordered = [];
-    const seen = new Set();
-    const start = nodes[0]?.id != null ? String(nodes[0].id) : null;
-    let cur = start;
-    while (cur && byId.has(cur) && !seen.has(cur) && ordered.length < 60) {
-      const n = byId.get(cur);
-      ordered.push(n);
-      seen.add(cur);
-      cur = n?.next != null ? String(n.next) : null;
+      // Lay out nodes top-down following "next" pointers from the first node.
+      const ordered = [];
+      const seen = new Set();
+      const start = nodes[0]?.id != null ? String(nodes[0].id) : null;
+      let cur = start;
+      while (cur && byId.has(cur) && !seen.has(cur) && ordered.length < 60) {
+        const n = byId.get(cur);
+        ordered.push(n);
+        seen.add(cur);
+        cur = n?.next != null ? String(n.next) : null;
+      }
+      // Add any remaining nodes (fallback)
+      for (const n of nodes) {
+        const id = String(n.id);
+        if (!seen.has(id)) ordered.push(n);
+      }
+
+      const nodeW = 320;
+      const nodeH = 84;
+      const gapY = 34;
+      const padX = 30;
+      const padY = 26;
+
+      const positioned = ordered.map((n, i) => ({
+        ...n,
+        __x: padX,
+        __y: padY + i * (nodeH + gapY),
+        __w: nodeW,
+        __h: nodeH
+      }));
+
+      const width = nodeW + padX * 2;
+      const height = positioned.length ? padY * 2 + positioned.length * nodeH + (positioned.length - 1) * gapY : 140;
+
+      return { positioned, width, height, error: false };
+    } catch (e) {
+      console.error("Flowchart rendering error:", e);
+      return { positioned: [], width: 300, height: 140, error: true };
     }
-    // Add any remaining nodes (fallback)
-    for (const n of nodes) {
-      const id = String(n.id);
-      if (!seen.has(id)) ordered.push(n);
-    }
-
-    const nodeW = 320;
-    const nodeH = 84;
-    const gapY = 34;
-    const padX = 30;
-    const padY = 26;
-
-    const positioned = ordered.map((n, i) => ({
-      ...n,
-      __x: padX,
-      __y: padY + i * (nodeH + gapY),
-      __w: nodeW,
-      __h: nodeH
-    }));
-
-    const width = nodeW + padX * 2;
-    const height = positioned.length ? padY * 2 + positioned.length * nodeH + (positioned.length - 1) * gapY : 140;
-
-    return { positioned, width, height };
   }, [flowchart]);
+
+  if (model.error) {
+    return <div className="empty-state">Unable to render flowchart due to malformed data.</div>;
+  }
 
   if (!Array.isArray(flowchart) || flowchart.length === 0) {
     return <div className="empty-state">Flowchart appears here.</div>;

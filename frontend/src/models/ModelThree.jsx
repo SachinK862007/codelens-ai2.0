@@ -28,6 +28,7 @@ Rules:
 - Use concrete versions: e.g. "React 18 + TypeScript", not "frontend framework".
 - API links must be real official URLs.
 - Phases must be detailed and tailored to the description.
+- The "file_folder_structure" MUST show ALL folders and files completely. Do NOT truncate, use "..." or skip any files. Be comprehensive.
 - Never reuse cached output; regenerate fully every request.`;
 
 export default function ModelThree({ onSaveHistory }) {

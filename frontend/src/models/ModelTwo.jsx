@@ -15,8 +15,9 @@ Each error object must include:
 error_type, line_number, wrong_line, corrected_line, explanation
 
 Rules:
+- The user may provide raw source code OR an error stack trace pasted from a terminal. If it's a stack trace, deduce the original code and the fixes required.
 - List EVERY error you find (syntax, logic, runtime) as separate objects in errors[].
-- corrected_code must be the complete fixed program as one string.
+- corrected_code must be the complete fixed program as one string, stripped of any terminal error trace text.
 - execution_output must be a single string (use \\n for newlines), NOT an array.
 - Never use backticks. JSON only.`;
 
@@ -103,7 +104,7 @@ ${src}`.trim();
       <div className="panel">
         <div className="panel-title">Smart Error Debugger</div>
         <div className="panel-subtitle">
-          Paste or upload code. AI returns a structured error report + full corrected code.
+          Paste or upload code (or terminal error output). AI returns a structured error report + full corrected code.
         </div>
         <div className="field-row">
           <label>Language</label>
@@ -113,7 +114,7 @@ ${src}`.trim();
             <option value="cpp">C++</option>
           </select>
         </div>
-        <CodeWorkbench language={language} value={code} onChange={setCode} height={360} />
+        <CodeWorkbench language={language} value={code} onChange={setCode} height={460} />
         <div className="field-row">
           <label>Or upload a file</label>
           <input type="file" onChange={handleFile} disabled={loading} />

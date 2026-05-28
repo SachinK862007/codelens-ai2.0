@@ -97,6 +97,12 @@ function repairJsonNewlines(text) {
 function repairJsonSyntax(text) {
   let repaired = text;
   
+  // Replace: "key": """value""" with "key": "value"
+  repaired = repaired.replace(/:\s*"""([\s\S]*?)"""/g, (match, inner) => {
+    const escaped = inner.replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '');
+    return `: "${escaped}"`;
+  });
+
   // Replace: "key": `value` with "key": "value"
   repaired = repaired.replace(/:\s*\`([\s\S]*?)\`/g, (match, inner) => {
     // Escape double quotes and newlines inside the backticks

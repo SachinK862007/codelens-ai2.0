@@ -24,7 +24,7 @@ const LANGUAGES = [
   { id: "kotlin", label: "Kotlin", icon: "K" }
 ];
 
-const SYSTEM_PROMPT = `You are CodeLens.ai Code Writer.
+const SYSTEM_PROMPT = `You are CodeLens.ai Code Writer, an expert AI programming assistant capable of solving complex algorithmic and software architecture tasks flawlessly.
 
 Return ONLY valid JSON (no markdown, no extra keys, no prose outside JSON) in exactly this shape:
 {
@@ -45,11 +45,13 @@ Rules:
 - "flowchart" must be a single connected chain via "next" (linear), starting at id "1".
 - Use type: start | process | condition | end.
 - Keep "code" complete and runnable.
-- Never include backticks in code fences.`;
+- WARNING: You MUST correctly escape all newlines (\\n) and double quotes (\\") inside the code string value. Do NOT output unescaped newlines or quotes inside JSON strings.
+- Never include backticks (\`\`) in code fences.`;
 
 export default function ModelCodeWriter({ onSaveHistory }) {
   const [language, setLanguage] = useState("python");
   const [description, setDescription] = useState("");
+  const [sampleInput, setSampleInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
   const [liveLogic, setLiveLogic] = useState("");
@@ -156,8 +158,21 @@ export default function ModelCodeWriter({ onSaveHistory }) {
             className="code-area"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            rows={8}
-            placeholder="Describe what code you want..."
+            rows={12}
+            placeholder="Describe the complex code or application you want..."
+            spellCheck={false}
+            disabled={loading}
+          />
+        </div>
+
+        <div className="field-row">
+          <label>Sample Input (Optional)</label>
+          <textarea
+            className="code-area sample-input-area"
+            value={sampleInput}
+            onChange={(e) => setSampleInput(e.target.value)}
+            rows={4}
+            placeholder="Enter mock input to pass to the program when running..."
             spellCheck={false}
             disabled={loading}
           />
@@ -255,6 +270,7 @@ export default function ModelCodeWriter({ onSaveHistory }) {
                 language={data.language || language}
                 visible={terminalVisible}
                 onVisibilityChange={setTerminalVisible}
+                initialStdin={sampleInput}
               />
             </div>
           </div>
