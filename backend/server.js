@@ -201,7 +201,8 @@ const ollamaStreamToSse = async ({ system, userText }, res) => {
       body: JSON.stringify({
         model: modelToUse,
         prompt,
-        stream: true
+        stream: true,
+        keep_alive: "1h"
       }),
       timeoutMs: 120000 // 120s for initial response (large models can be slow)
     });
@@ -829,10 +830,12 @@ ${code || ""}`.trim();
 
   let collected = "";
   try {
-    const upstream = await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
+    const modelToUse = await pickWorkingModel();
+    if (!modelToUse) throw new Error("No model available");
+    const upstream = await ollamaFetch(`${OLLAMA_BASE_URL}/api/generate`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: OLLAMA_MODEL, prompt: `${system}\n\n${userText}`, stream: false })
+      body: JSON.stringify({ model: modelToUse, prompt: `${system}\n\n${userText}`, stream: false, keep_alive: "1h" })
     });
     const json = await upstream.json();
     collected = json.response || "";
@@ -930,8 +933,6 @@ wss.on("connection", (ws) => {
         let cmd = "";
         let args = [];
 
-        ws.send(JSON.stringify({ type: "output", data: `\x1b[35m$ run ${language}\x1b[0m\r\n` }));
-
         if (language === "python") {
           const filePath = path.join(dir, "main.py");
           const clean = sanitizeCode(code, "python");
@@ -969,6 +970,10 @@ wss.on("connection", (ws) => {
         const launchChild = (launchCmd, launchArgs) => {
           const safeEnv = { ...process.env };
           delete safeEnv.GEMINI_API_KEY;
+          
+          const fullCmd = `${launchCmd} ${launchArgs.join(" ")}`;
+          ws.send(JSON.stringify({ type: "output", data: `\x1b[32m${dir}>\x1b[0m ${fullCmd}\r\n` }));
+          
           child = spawn(launchCmd, launchArgs, { windowsHide: true, env: safeEnv });
 
           child.stdout.on("data", (d) => {

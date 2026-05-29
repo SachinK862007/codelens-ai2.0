@@ -1,10 +1,13 @@
 /**
  * SimpleTerminal — interactive execution panel (WebSocket).
- * Styled to match CodeLens purple theme with a realistic console inside.
+ * Now using xterm.js to match the VS Code integrated terminal experience!
  */
 import React, {
   useEffect, useRef, useState, useImperativeHandle, forwardRef
 } from "react";
+import { Terminal } from "xterm";
+import { FitAddon } from "xterm-addon-fit";
+import "xterm/css/xterm.css";
 
 const WS_URL = "ws://localhost:8000";
 
@@ -12,14 +15,13 @@ const SimpleTerminal = forwardRef(function SimpleTerminal(
   { code, language, visible, onVisibilityChange, autoScroll = true, initialStdin = "" },
   ref
 ) {
-  const [output, setOutput] = useState("");
-  const [inputValue, setInputValue] = useState("");
   const [status, setStatus] = useState("idle");
   const [exitCode, setExitCode] = useState(null);
 
+  const terminalRef = useRef(null);
+  const termInstance = useRef(null);
+  const fitAddon = useRef(null);
   const wsRef = useRef(null);
-  const outputRef = useRef(null);
-  const inputRef = useRef(null);
   const statusRef = useRef("idle");
 
   const updateStatus = (s) => {
@@ -27,25 +29,76 @@ const SimpleTerminal = forwardRef(function SimpleTerminal(
     setStatus(s);
   };
 
+  // Initialize xterm
   useEffect(() => {
-    if (autoScroll && outputRef.current) {
-      outputRef.current.scrollTop = outputRef.current.scrollHeight;
-    }
-  }, [output, autoScroll]);
+    if (!terminalRef.current) return;
 
+    const term = new Terminal({
+      cursorBlink: true,
+      fontFamily: '"Consolas", "Courier New", monospace',
+      fontSize: 14,
+      theme: {
+        background: '#1b1233',
+        foreground: '#f6efff',
+        cursor: '#9ef1c2'
+      }
+    });
+
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    
+    term.open(terminalRef.current);
+    fit.fit();
+
+    termInstance.current = term;
+    fitAddon.current = fit;
+
+    term.writeln('\x1b[35mTerminal initialized. Ready.\x1b[0m');
+
+    // Handle user input
+    term.onData(data => {
+      if (wsRef.current?.readyState === WebSocket.OPEN && statusRef.current === "running") {
+        const payload = data === '\r' ? '\n' : data;
+        wsRef.current.send(JSON.stringify({ type: "input", input: payload }));
+        
+        // Basic Local Echo (since we lack a PTY on the backend)
+        const char = data;
+        if (char === '\r') {
+          term.write('\r\n');
+        } else if (char === '\x7F') { // Backspace
+          term.write('\b \b');
+        } else {
+          term.write(char);
+        }
+      }
+    });
+
+    const handleResize = () => fit.fit();
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      term.dispose();
+    };
+  }, []);
+
+  // Fit terminal when it becomes visible
   useEffect(() => {
-    if (status === "running") inputRef.current?.focus();
-  }, [status]);
+    if (visible && fitAddon.current) {
+      setTimeout(() => fitAddon.current.fit(), 50);
+    }
+  }, [visible]);
 
   useEffect(() => () => wsRef.current?.close(), []);
 
-  const appendText = (text) => setOutput((prev) => prev + text);
-
   const connectAndRun = () => {
-    setOutput("");
-    setInputValue("");
     setExitCode(null);
     updateStatus("running");
+
+    if (termInstance.current) {
+      termInstance.current.clear();
+      termInstance.current.writeln('\x1b[36mStarting process...\x1b[0m');
+    }
 
     if (wsRef.current) {
       wsRef.current.onclose = null;
@@ -62,7 +115,7 @@ const SimpleTerminal = forwardRef(function SimpleTerminal(
         setTimeout(() => {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: "input", input: initialStdin.trim() + "\n" }));
-            appendText(`> [Sample Input Provided]\n`);
+            termInstance.current?.writeln(`\x1b[33m> [Sample Input Provided]\x1b[0m`);
           }
         }, 300);
       }
@@ -72,22 +125,21 @@ const SimpleTerminal = forwardRef(function SimpleTerminal(
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === "output") {
-          const clean = (msg.data || "")
-            .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "") // strip ANSI
-            .replace(/\r\n/g, "\n")
-            .replace(/\r/g, "\n");
-          appendText(clean);
+          // Normalize line endings for xterm
+          const clean = (msg.data || "").replace(/\r\n/g, "\n").replace(/\n/g, "\r\n");
+          termInstance.current?.write(clean);
         } else if (msg.type === "exit") {
           const codeNum = msg.code ?? 0;
           setExitCode(codeNum);
           updateStatus("exited");
-          appendText(`\n[Process exited with code ${codeNum}]\n`);
+          termInstance.current?.writeln(`\r\n\x1b[35m[Process exited with code ${codeNum}]\x1b[0m`);
         }
       } catch { /* ignore */ }
     };
 
     ws.onerror = () => {
-      appendText("Cannot connect to backend on port 8000.\nStart it with: cd backend && npm run dev\n");
+      termInstance.current?.writeln("\r\n\x1b[31mCannot connect to backend on port 8000.\x1b[0m");
+      termInstance.current?.writeln("Start it with: cd backend && npm run dev\r\n");
       updateStatus("exited");
       setExitCode(1);
     };
@@ -106,14 +158,6 @@ const SimpleTerminal = forwardRef(function SimpleTerminal(
     }
   }));
 
-  const sendInput = () => {
-    const val = inputValue.trim();
-    if (!val || wsRef.current?.readyState !== WebSocket.OPEN) return;
-    wsRef.current.send(JSON.stringify({ type: "input", input: `${val}\n` }));
-    appendText(`> ${val}\n`);
-    setInputValue("");
-  };
-
   if (!visible) return null;
 
   const isRunning = status === "running";
@@ -124,7 +168,7 @@ const SimpleTerminal = forwardRef(function SimpleTerminal(
     status === "idle" ? "Ready" : isRunning ? "Running" : `Exited (${exitCode ?? "?"})`;
 
   return (
-    <div className="codelens-terminal">
+    <div className="codelens-terminal" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: '300px' }}>
       <div className="codelens-terminal-titlebar">
         <span className="codelens-terminal-title">
           Terminal <span className="codelens-terminal-lang">{language}</span>
@@ -152,35 +196,10 @@ const SimpleTerminal = forwardRef(function SimpleTerminal(
         </div>
       </div>
 
-      <div ref={outputRef} className="codelens-terminal-output">
-        {output ? (
-          <pre className="codelens-terminal-pre">{output}</pre>
-        ) : (
-          <span className="codelens-terminal-placeholder">Output will appear here…</span>
-        )}
-      </div>
-
-      <div className="codelens-terminal-inputrow">
-        <span className="codelens-terminal-prompt">&gt;</span>
-        <input
-          ref={inputRef}
-          type="text"
-          className="codelens-terminal-input"
-          value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && sendInput()}
-          placeholder={isRunning ? "Type input and press Enter…" : "Run code first"}
-          disabled={!isRunning}
-        />
-        <button
-          type="button"
-          className="codelens-terminal-send"
-          onClick={sendInput}
-          disabled={!isRunning || !inputValue.trim()}
-        >
-          Send
-        </button>
-      </div>
+      <div 
+        ref={terminalRef} 
+        style={{ flex: 1, padding: '8px', background: '#1b1233', overflow: 'hidden' }}
+      ></div>
     </div>
   );
 });
