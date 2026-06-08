@@ -7,6 +7,7 @@ import ModelTwo from "./models/ModelTwo.jsx";
 import ModelThree from "./models/ModelThree.jsx";
 import ModelFour from "./models/ModelFour.jsx";
 import ModelCodeWriter from "./models/ModelCodeWriter.jsx";
+import ModelGitReview from "./models/ModelGitReview.jsx";
 
 const STORAGE_KEY = "codelens_history_v1";
 const RUNNER_PREFILL_KEY = "codelens_runner_prefill_v1";
@@ -16,6 +17,7 @@ const MODEL_CONFIG = [
   { id: "model-2", name: "Codelens Debugger" },
   { id: "model-3", name: "Codelens Idea Builder" },
   { id: "model-4", name: "Codelens Learner" },
+  { id: "model-5", name: "Codelens Git Review" },
   { id: "code-writer", name: "Code Writer" }
 ];
 
@@ -136,6 +138,9 @@ export default function App() {
           )}
           {activeModelId === "model-4" && (
             <ModelFour onSaveHistory={addHistoryEntry} />
+          )}
+          {activeModelId === "model-5" && (
+            <ModelGitReview onSaveHistory={addHistoryEntry} />
           )}
           {activeModelId === "code-writer" && (
             <ModelCodeWriter onSaveHistory={addHistoryEntry} />

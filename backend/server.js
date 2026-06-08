@@ -882,9 +882,52 @@ app.post("/api/ai/stream", async (req, res) => {
   writeSse(res, { type: "start" });
 
   try {
-    const s = typeof system === "string" ? system : "";
-    const u = typeof userText === "string" ? userText : "";
+    let s = typeof system === "string" ? system : "";
+    let u = typeof userText === "string" ? userText : "";
     const provider = AI_PROVIDER.toLowerCase();
+
+    // Auto-Wikipedia Integration for Ollama/Gemini
+    let searchTerms = "";
+    if (s.includes("Smart Error Debugger")) {
+      const errorMatch = u.match(/([A-Za-z]+Error)/);
+      const langMatch = u.match(/Language.*?:\s*([A-Za-z+]+)/i);
+      if (errorMatch) {
+        searchTerms = `${errorMatch[1]} ${langMatch ? langMatch[1] : "programming"}`;
+      }
+    } else if (s.includes("Code Writer")) {
+      const taskMatch = u.match(/Task:\n([\s\S]*?)\n\nReturn/);
+      if (taskMatch) {
+        searchTerms = taskMatch[1].trim().slice(0, 150);
+      }
+    } else if (u.length > 0 && u.length < 1500 && !u.includes("Language:") && !u.includes("Repository:")) {
+      searchTerms = u.slice(0, 150);
+    }
+
+    if (searchTerms) {
+      try {
+        const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(searchTerms)}&utf8=&format=json&srlimit=1`;
+        const searchRes = await fetch(searchUrl, { signal: AbortSignal.timeout(1500) });
+        const searchData = await searchRes.json();
+        const results = searchData.query?.search || [];
+        if (results.length > 0) {
+          let context = "";
+          for (const result of results) {
+            const extractUrl = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=1&explaintext=1&titles=${encodeURIComponent(result.title)}&format=json`;
+            const extRes = await fetch(extractUrl, { signal: AbortSignal.timeout(1500) });
+            const extData = await extRes.json();
+            const page = Object.values(extData.query?.pages || {})[0];
+            if (page && page.extract) {
+              context += `Wiki (${result.title}): ${page.extract}\\n`;
+            }
+          }
+          if (context) {
+            s += `\\n\\n[Background context from Wikipedia to help you answer accurately and quickly:\\n${context}]`;
+          }
+        }
+      } catch (e) {
+        // silently ignore wikipedia errors to keep things fast
+      }
+    }
 
     if (provider === "gemini") {
       await geminiStreamToSse({ system: s, userText: u }, res);
@@ -900,6 +943,120 @@ app.post("/api/ai/stream", async (req, res) => {
     }
   } catch (e) {
     writeSse(res, { type: "error", error: e?.message || "Streaming failed." });
+    writeSse(res, { type: "done" });
+  } finally {
+    res.end();
+  }
+});
+
+// Back-compat alias
+app.post("/api/git-review", async (req, res) => {
+  const { repoUrl } = req.body;
+  if (!repoUrl) {
+    res.write(`data: ${JSON.stringify({ type: "error", error: "repoUrl is required" })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+    res.end();
+    return;
+  }
+
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+
+  writeSse(res, { type: "start" });
+  writeSse(res, { type: "phase", phase: "fetching", label: "Fetching from GitHub API..." });
+
+  try {
+    const match = repoUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
+    if (!match) {
+      throw new Error("Invalid GitHub URL. Must be in format https://github.com/owner/repo");
+    }
+    const [, owner, repo] = match;
+    const cleanRepo = repo.replace(/\.git$/, "");
+
+    const repoRes = await fetch(`https://api.github.com/repos/${owner}/${cleanRepo}`);
+    if (!repoRes.ok) throw new Error("Failed to fetch repository details from GitHub.");
+    const repoData = await repoRes.json();
+
+    let readmeText = "";
+    const readmeRes = await fetch(`https://api.github.com/repos/${owner}/${cleanRepo}/readme`);
+    if (readmeRes.ok) {
+      const readmeJson = await readmeRes.json();
+      if (readmeJson.content) {
+        readmeText = Buffer.from(readmeJson.content, "base64").toString("utf8");
+      }
+    }
+
+    const system = "You are an expert Code Reviewer and Software Architect. Review the provided GitHub repository details and README. Give a comprehensive summary of what the project does, its tech stack, potential use cases, and constructive feedback on how it could be improved or extended. Use markdown formatting. Provide your answer quickly and without raw data artifacts.";
+    const userText = `Repository: ${repoData.full_name}\nDescription: ${repoData.description || "N/A"}\nStars: ${repoData.stargazers_count}\nLanguage: ${repoData.language}\nTopics: ${(repoData.topics || []).join(", ")}\n\nREADME:\n${readmeText.slice(0, 5000)}`;
+
+    const provider = AI_PROVIDER.toLowerCase();
+    if (provider === "gemini" || (provider === "auto" && GEMINI_API_KEY)) {
+      await geminiStreamToSse({ system, userText }, res);
+    } else {
+      await ollamaStreamToSse({ system, userText }, res);
+    }
+  } catch (e) {
+    writeSse(res, { type: "error", error: e?.message || "Git review failed." });
+    writeSse(res, { type: "done" });
+  } finally {
+    res.end();
+  }
+});
+
+app.post("/api/research", async (req, res) => {
+  const { query } = req.body;
+  if (!query) {
+    res.write(`data: ${JSON.stringify({ type: "error", error: "query is required" })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+    res.end();
+    return;
+  }
+
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+
+  writeSse(res, { type: "start" });
+  writeSse(res, { type: "phase", phase: "searching", label: "Searching Wikipedia..." });
+
+  try {
+    const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=&format=json&srlimit=3`;
+    const searchRes = await fetch(searchUrl);
+    if (!searchRes.ok) throw new Error("Failed to reach Wikipedia API.");
+    const searchData = await searchRes.json();
+    
+    const results = searchData.query?.search || [];
+    let context = "";
+    
+    if (results.length > 0) {
+      for (const result of results) {
+        const extractUrl = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=1&explaintext=1&titles=${encodeURIComponent(result.title)}&format=json`;
+        const extRes = await fetch(extractUrl);
+        const extData = await extRes.json();
+        const pages = extData.query?.pages || {};
+        const page = Object.values(pages)[0];
+        if (page && page.extract) {
+          context += `Source: Wikipedia (${result.title})\n${page.extract}\n\n`;
+        }
+      }
+    } else {
+      context = "No relevant Wikipedia articles found.";
+    }
+
+    const system = "You are a helpful and intelligent AI Research Assistant. Answer the user's question accurately using ONLY the provided Wikipedia context. Do not include raw JSON or HTML. Output clean, readable markdown. If the context does not contain the answer, say so, but provide your best general knowledge answer.";
+    const userText = `Context from Wikipedia:\n${context}\n\nUser Question: ${query}`;
+
+    const provider = AI_PROVIDER.toLowerCase();
+    if (provider === "gemini" || (provider === "auto" && GEMINI_API_KEY)) {
+      await geminiStreamToSse({ system, userText }, res);
+    } else {
+      await ollamaStreamToSse({ system, userText }, res);
+    }
+  } catch (e) {
+    writeSse(res, { type: "error", error: e?.message || "Research failed." });
     writeSse(res, { type: "done" });
   } finally {
     res.end();
@@ -946,13 +1103,14 @@ wss.on("connection", (ws) => {
           const outputPath = path.join(dir, "main.exe");
           await fs.writeFile(filePath, sanitizeCode(code, language), "utf8");
 
-          ws.send(JSON.stringify({ type: "output", data: `\x1b[90mCompiling...\x1b[0m\r\n` }));
           const safeEnv = { ...process.env };
           delete safeEnv.GEMINI_API_KEY;
           const compile = spawn(compiler, [filePath, "-o", outputPath], { windowsHide: true, env: safeEnv });
 
           compile.stderr.on("data", (d) => {
-            ws.send(JSON.stringify({ type: "output", data: d.toString().replace(/\n/g, "\r\n") }));
+            let text = d.toString().replace(/\n/g, "\r\n");
+            text = text.split(dir).join(".");
+            ws.send(JSON.stringify({ type: "output", data: text }));
           });
 
           const compileSucceeded = await new Promise((resolve) => {
@@ -971,17 +1129,18 @@ wss.on("connection", (ws) => {
           const safeEnv = { ...process.env };
           delete safeEnv.GEMINI_API_KEY;
           
-          const fullCmd = `${launchCmd} ${launchArgs.join(" ")}`;
-          ws.send(JSON.stringify({ type: "output", data: `\x1b[32m${dir}>\x1b[0m ${fullCmd}\r\n` }));
-          
           child = spawn(launchCmd, launchArgs, { windowsHide: true, env: safeEnv });
 
           child.stdout.on("data", (d) => {
-            ws.send(JSON.stringify({ type: "output", data: d.toString().replace(/\n/g, "\r\n") }));
+            let text = d.toString().replace(/\n/g, "\r\n");
+            text = text.split(dir).join(".");
+            ws.send(JSON.stringify({ type: "output", data: text }));
           });
 
           child.stderr.on("data", (d) => {
-            ws.send(JSON.stringify({ type: "output", data: d.toString().replace(/\n/g, "\r\n") }));
+            let text = d.toString().replace(/\n/g, "\r\n");
+            text = text.split(dir).join(".");
+            ws.send(JSON.stringify({ type: "output", data: text }));
           });
 
           child.on("error", () => {

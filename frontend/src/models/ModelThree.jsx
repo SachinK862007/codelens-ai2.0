@@ -17,7 +17,7 @@ Respond ONLY valid JSON (no markdown, no extra keys) in this exact shape:
   "recommended_tech_stack": ["..."],
   "recommended_apis": [{ "name": "...", "link": "https://..." , "why": "..." }],
   "research_references": [{ "title": "...", "where_to_find": "..." , "why_relevant": "..." }],
-  "file_folder_structure": "multi-line plain text tree using ├── and │ characters, show ALL folders and files",
+  "file_folder_structure": "multi-line plain text tree using ├── and │ characters, MUST escape newlines as \\n",
   "phases": [
     { "name": "Phase 1", "estimated_time": "2-4 days", "tasks": ["..."] }
   ],

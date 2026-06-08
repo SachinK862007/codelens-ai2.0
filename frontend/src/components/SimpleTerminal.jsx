@@ -97,7 +97,6 @@ const SimpleTerminal = forwardRef(function SimpleTerminal(
 
     if (termInstance.current) {
       termInstance.current.clear();
-      termInstance.current.writeln('\x1b[36mStarting process...\x1b[0m');
     }
 
     if (wsRef.current) {
@@ -132,7 +131,6 @@ const SimpleTerminal = forwardRef(function SimpleTerminal(
           const codeNum = msg.code ?? 0;
           setExitCode(codeNum);
           updateStatus("exited");
-          termInstance.current?.writeln(`\r\n\x1b[35m[Process exited with code ${codeNum}]\x1b[0m`);
         }
       } catch { /* ignore */ }
     };

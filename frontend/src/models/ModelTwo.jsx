@@ -30,8 +30,8 @@ Rules:
 - You MUST find and list EVERY single error in the code — syntax, logic, runtime, and semantic. Do NOT stop after finding one or two. Scan the ENTIRE program.
 - Each error gets its own separate object in the errors array. Never merge multiple errors into one.
 - corrected_code must be the COMPLETE fixed program — never truncate it.
-- All newlines inside string values MUST be escaped as \\n. Never use literal newlines inside JSON strings.
-- All double quotes inside string values MUST be escaped as \\".
+- ESCAPE NEWLINES: You MUST write \\n for newlines inside strings. NEVER output a literal newline character inside a JSON string.
+- ESCAPE QUOTES: You MUST write \\" for double quotes inside strings. Do NOT use literal """ or ''' inside JSON strings.
 - execution_output must be a plain string, NOT an array or object.
 - Never use backticks anywhere in the JSON.
 - If the input is a terminal stack trace, deduce the original code and all fixes from it.`;

@@ -7,10 +7,10 @@ CodeLens is a local-first, open-source AI-powered developer tool. It supports re
 ### Features
 
 - **Code Runner** — write and run Python, C, or C++ in a Monaco editor with an interactive WebSocket terminal. Includes an Algorithm & Flowchart popup powered by the backend.
-- **Smart Error Debugger** — paste broken code or a terminal stack trace. AI returns a structured error report (every error listed separately), full corrected code, and a live terminal to run the fix interactively. Auto-verification skips interactive programs to avoid false EOFErrors.
+- **Smart Error Debugger** — paste broken code or a terminal stack trace. AI returns a structured error report (every error listed separately), full corrected code, and a live terminal to run the fix interactively. **Now powered by Wikipedia API** for fast, real-world context on programming errors.
 - **Project Roadmap Generator** — describe a project idea and get a tailored roadmap with tech stack, APIs, research references, file/folder structure, build phases, and deployment steps.
 - **Practice Arena** — VS Code-style Monaco editor with graded coding challenges. Logic-based grading (case-insensitive), fast local pre-check before hitting the AI.
-- **Code Writer** — describe what you want in any of 13 languages. Returns structured output: generated code, algorithm steps, logic explanation, and complexity badges. Robust JSON parsing handles unescaped newlines and quotes from local models.
+- **Code Writer** — describe what you want in any of 13 languages. Returns structured output: generated code, algorithm steps (in a sleek **Modal Popup**), and an execution flowchart (dynamically rendered via **mermaid.js**). **Backed by Wikipedia API** to ensure accuracy and real-world relevance.
 - **Interactive Terminal** — WebSocket-based, renders output correctly line-by-line using a `<pre>` element. Supports live stdin input mid-execution.
 - **History Panel** — saved locally in browser storage.
 - **AI Loading Animations** — phase-aware streaming progress indicators per module.

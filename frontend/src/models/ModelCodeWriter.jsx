@@ -5,6 +5,37 @@ import { streamClaudeJson } from "../lib/claudeStream.js";
 import { extractJsonString, safeJsonParse, extractCodeWriterFields } from "../lib/partialJson.js";
 import { detectStreamProgress } from "../lib/streamProgress.js";
 import AILoadingAnimation, { AISkeletonLoader } from "../components/AILoadingAnimation.jsx";
+import Modal from "../components/Modal.jsx";
+import mermaid from "mermaid";
+
+function MermaidDiagram({ chart }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (ref.current && chart) {
+      mermaid.initialize({ startOnLoad: false, theme: "dark", background: "transparent" });
+      mermaid.render("mermaid-svg-" + Math.floor(Math.random() * 1000000), chart).then((result) => {
+        if (ref.current) ref.current.innerHTML = result.svg;
+      }).catch(err => {
+        if (ref.current) ref.current.innerHTML = `<div class="error">Failed to render flowchart.</div>`;
+      });
+    }
+  }, [chart]);
+  return <div ref={ref} style={{ display: "flex", justifyContent: "center", overflow: "auto" }} />;
+}
+
+function generateMermaidCode(flowchart) {
+  if (!Array.isArray(flowchart) || !flowchart.length) return "";
+  let diag = "graph TD\\n";
+  flowchart.forEach(n => {
+    let shape = n.label || "";
+    if (n.type === "start" || n.type === "end") shape = `([${shape}])`;
+    else if (n.type === "condition") shape = `{${shape}}`;
+    else shape = `[${shape}]`;
+    diag += `  ${n.id}${shape}\\n`;
+    if (n.next) diag += `  ${n.id} --> ${n.next}\\n`;
+  });
+  return diag;
+}
 
 const LANGUAGES = [
   { id: "c", label: "C", icon: "C" },
@@ -89,6 +120,8 @@ export default function ModelCodeWriter({ onSaveHistory }) {
   const abortRef = useRef(null);
   const terminalRef = useRef(null);
   const [terminalVisible, setTerminalVisible] = useState(true);
+  const [algoOpen, setAlgoOpen] = useState(false);
+  const [flowOpen, setFlowOpen] = useState(false);
 
   const langMeta = useMemo(
     () => LANGUAGES.find((l) => l.id === language) || LANGUAGES[0],
@@ -250,16 +283,16 @@ export default function ModelCodeWriter({ onSaveHistory }) {
 
             <CodeBlock title="Generated Code" code={data.code || ""} language={data.language || language} />
 
-            <div className="card">
-              <div className="section-label">Algorithm</div>
-              {Array.isArray(data.algorithm) && data.algorithm.length ? (
-                <ol className="steps-list numbered">
-                  {data.algorithm.map((s, idx) => (
-                    <li key={`${idx}-${s}`}>{s}</li>
-                  ))}
-                </ol>
-              ) : (
-                <div className="empty-state">Algorithm steps appear here.</div>
+            <div className="button-row" style={{ marginTop: 16, marginBottom: 16 }}>
+              {Array.isArray(data.algorithm) && data.algorithm.length > 0 && (
+                <button className="ghost-button" type="button" onClick={() => setAlgoOpen(true)}>
+                  Show Algorithm
+                </button>
+              )}
+              {Array.isArray(data.flowchart) && data.flowchart.length > 0 && (
+                <button className="ghost-button" type="button" onClick={() => setFlowOpen(true)}>
+                  Show Flowchart
+                </button>
               )}
             </div>
 
@@ -301,6 +334,26 @@ export default function ModelCodeWriter({ onSaveHistory }) {
           <div className="empty-state">Generate code to see structured output.</div>
         )}
       </div>
+
+      <Modal open={algoOpen} title="Algorithm Logic" onClose={() => setAlgoOpen(false)}>
+        {data && Array.isArray(data.algorithm) ? (
+          <ol className="steps-list numbered" style={{ margin: 0 }}>
+            {data.algorithm.map((s, idx) => (
+              <li key={`${idx}-${s}`}>{s}</li>
+            ))}
+          </ol>
+        ) : (
+          <div className="empty-state">No algorithm steps provided.</div>
+        )}
+      </Modal>
+
+      <Modal open={flowOpen} title="Execution Flowchart" onClose={() => setFlowOpen(false)}>
+        {data && Array.isArray(data.flowchart) ? (
+          <MermaidDiagram chart={generateMermaidCode(data.flowchart)} />
+        ) : (
+          <div className="empty-state">No flowchart provided.</div>
+        )}
+      </Modal>
     </div>
   );
 }
